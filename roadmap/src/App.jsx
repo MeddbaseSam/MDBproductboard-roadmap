@@ -463,7 +463,7 @@ async function exportSlidesAsZip(grouped) {
 
 // ─── Roadmap Board ────────────────────────────────────────────────────────────
 
-function RoadmapBoard({ releases, features, onReload }) {
+function RoadmapBoard({ releases, features, objectives, onReload }) {
   const [mapping, setMapping] = useState(() => loadSavedMapping() || DEFAULT_MAPPING);
   const [showSettings, setShowSettings] = useState(false);
   const [showUnmapped, setShowUnmapped] = useState(false);
@@ -479,7 +479,22 @@ function RoadmapBoard({ releases, features, onReload }) {
     catch (_) { return null; }
   });
   const [showStatusFilter, setShowStatusFilter] = useState(false);
+  const [selectedObjectives, setSelectedObjectives] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pb_selected_objectives") || "[]"); }
+    catch (_) { return []; }
+  });
+  const [showObjectiveFilter, setShowObjectiveFilter] = useState(false);
   const boardRef = useRef(null); // kept for future use
+
+  const toggleObjective = (objName) => {
+    setSelectedObjectives((prev) => {
+      const next = prev.includes(objName)
+        ? prev.filter((o) => o !== objName)
+        : [...prev, objName];
+      try { localStorage.setItem("pb_selected_objectives", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
 
   // Collect all unique statuses from features for the filter UI
   const allStatuses = useMemo(() => {
@@ -540,6 +555,12 @@ function RoadmapBoard({ releases, features, onReload }) {
       if (f.archived) continue;
       // Apply status filter
       if (activeHiddenStatuses.includes(f.status?.name)) continue;
+      // Apply objective filter — if any objectives selected, feature must match at least one
+      if (selectedObjectives.length > 0) {
+        const featureObjectives = f._objectives ?? [];
+        const matches = selectedObjectives.some((o) => featureObjectives.includes(o));
+        if (!matches) continue;
+      }
       const releaseInfo = f._releaseId ? releaseHorizonMap[f._releaseId] : null;
       if (releaseInfo) {
         grouped[releaseInfo.horizon].features.push(f);
@@ -560,7 +581,7 @@ function RoadmapBoard({ releases, features, onReload }) {
     }
 
     return { grouped, unmapped };
-  }, [features, releaseHorizonMap, hiddenStatuses]);
+  }, [features, releaseHorizonMap, hiddenStatuses, selectedObjectives, activeHiddenStatuses]);
 
   const totalFeatures = HORIZONS.reduce((n, h) => n + grouped[h].features.length, 0);
 
@@ -640,6 +661,37 @@ function RoadmapBoard({ releases, features, onReload }) {
               </div>
             )}
           </div>
+          <div className="status-filter-wrap">
+            <button className="btn btn-sm" onClick={() => setShowObjectiveFilter((v) => !v)}>
+              Objective {selectedObjectives.length > 0 ? `(${selectedObjectives.length})` : "filter"}
+            </button>
+            {showObjectiveFilter && (
+              <div className="status-filter-dropdown">
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 8 }}>
+                  Filter by objective
+                </div>
+                {objectives.map((obj) => (
+                  <label key={obj.id} className="status-filter-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedObjectives.includes(obj.name)}
+                      onChange={() => toggleObjective(obj.name)}
+                    />
+                    <span style={{ fontSize: 12 }}>{obj.name}</span>
+                  </label>
+                ))}
+                {selectedObjectives.length > 0 && (
+                  <button
+                    className="btn btn-sm"
+                    style={{ width: "100%", marginTop: 8 }}
+                    onClick={() => { setSelectedObjectives([]); try { localStorage.removeItem("pb_selected_objectives"); } catch(_){} }}
+                  >
+                    Show all
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <button className="btn btn-sm" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
@@ -690,7 +742,7 @@ function ErrorScreen({ message, onRetry }) {
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { status, releases, features, error, progress, load, reset } = useProductBoard();
+  const { status, releases, features, objectives, error, progress, load, reset } = useProductBoard();
 
   useEffect(() => {
     load();
@@ -710,6 +762,7 @@ export default function App() {
         <RoadmapBoard
           releases={releases}
           features={features}
+          objectives={objectives}
           onReload={handleReload}
         />
       )}

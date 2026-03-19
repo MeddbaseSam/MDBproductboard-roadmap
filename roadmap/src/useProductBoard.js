@@ -105,6 +105,43 @@ async function fetchCVPValues(cvpFieldId) {
   }
 }
 
+// ─── Objective map ───────────────────────────────────────────────────────────
+
+async function fetchObjectiveFeatureMap() {
+  // Returns { [featureId]: [objectiveName, ...] }
+  // and { objectives: [{id, name}] }
+  try {
+    const objectives = await fetchAllPages("/objectives", null, "objectives");
+    console.log(`Found ${objectives.length} objectives`);
+
+    const featureObjectiveMap = {}; // featureId -> Set of objective names
+    for (const obj of objectives) {
+      const links = await fetchAllPages(
+        `/objectives/${obj.id}/links/features`,
+        null,
+        `objective links`
+      );
+      for (const link of links) {
+        const featureId = link.feature?.id ?? link.id;
+        if (!featureId) continue;
+        if (!featureObjectiveMap[featureId]) featureObjectiveMap[featureId] = new Set();
+        featureObjectiveMap[featureId].add(obj.name);
+      }
+    }
+
+    // Convert Sets to arrays
+    const map = {};
+    for (const [fId, nameSet] of Object.entries(featureObjectiveMap)) {
+      map[fId] = [...nameSet];
+    }
+    console.log(`Mapped objectives for ${Object.keys(map).length} features`);
+    return { featureObjectiveMap: map, objectives };
+  } catch (e) {
+    console.warn("Could not fetch objectives:", e.message);
+    return { featureObjectiveMap: {}, objectives: [] };
+  }
+}
+
 // ─── Component map ────────────────────────────────────────────────────────────
 
 async function fetchComponentMap() {
@@ -165,10 +202,11 @@ function buildTeamMap(features, componentMap) {
 async function loadAll(onProgress) {
   onProgress("Loading releases and field definitions...");
 
-  const [releases, cvpFieldId, componentMap] = await Promise.all([
+  const [releases, cvpFieldId, componentMap, { featureObjectiveMap, objectives }] = await Promise.all([
     fetchAllPages("/releases", null, "releases"),
     findCVPFieldId(),
     fetchComponentMap(),
+    fetchObjectiveFeatureMap(),
   ]);
 
   const [features, assignments] = await Promise.all([
@@ -196,6 +234,7 @@ async function loadAll(onProgress) {
     _releaseId: featureReleaseMap[f.id] ?? null,
     _cvp: cvpMap[f.id] ?? null,
     _team: teamMap[f.id] ?? null,
+    _objectives: featureObjectiveMap[f.id] ?? [],
   }));
 
   const sortedReleases = [...releases].sort((a, b) => {
@@ -204,7 +243,7 @@ async function loadAll(onProgress) {
     return da - db;
   });
 
-  return { releases: sortedReleases, features: enriched };
+  return { releases: sortedReleases, features: enriched, objectives };
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -214,6 +253,7 @@ export function useProductBoard() {
     status: "idle",
     releases: [],
     features: [],
+    objectives: [],
     error: null,
     progress: "",
   });
@@ -224,14 +264,14 @@ export function useProductBoard() {
       const { releases, features } = await loadAll((msg) =>
         setState((s) => ({ ...s, progress: msg }))
       );
-      setState({ status: "success", releases, features, error: null, progress: "" });
+      setState({ status: "success", releases, features, objectives, error: null, progress: "" });
     } catch (err) {
       setState({ status: "error", releases: [], features: [], error: err.message, progress: "" });
     }
   }, []);
 
   const reset = useCallback(() => {
-    setState({ status: "idle", releases: [], features: [], error: null, progress: "" });
+    setState({ status: "idle", releases: [], features: [], objectives: [], error: null, progress: "" });
   }, []);
 
   return { ...state, load, reset };
