@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/MDBproductboard-roadmap/static/css/main.b50d892c.css",
+    "main.js": "/MDBproductboard-roadmap/static/js/main.3095064d.js",
+    "index.html": "/MDBproductboard-roadmap/index.html",
+    "main.b50d892c.css.map": "/MDBproductboard-roadmap/static/css/main.b50d892c.css.map",
+    "main.3095064d.js.map": "/MDBproductboard-roadmap/static/js/main.3095064d.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.b50d892c.css",
+    "static/js/main.3095064d.js"
+  ]
+}
