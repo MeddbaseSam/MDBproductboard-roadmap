@@ -468,9 +468,15 @@ function RoadmapBoard({ releases, features, onReload }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showUnmapped, setShowUnmapped] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const DEFAULT_VISIBLE_STATUSES = ["backlog", "in design", "in development", "planned"];
+
   const [hiddenStatuses, setHiddenStatuses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("pb_hidden_statuses") || "[]"); }
-    catch (_) { return []; }
+    try {
+      const saved = localStorage.getItem("pb_hidden_statuses");
+      // If user has never configured the filter, return null to signal "use defaults"
+      return saved !== null ? JSON.parse(saved) : null;
+    }
+    catch (_) { return null; }
   });
   const [showStatusFilter, setShowStatusFilter] = useState(false);
   const boardRef = useRef(null); // kept for future use
@@ -484,11 +490,28 @@ function RoadmapBoard({ releases, features, onReload }) {
     return [...seen].sort();
   }, [features]);
 
+  // On first load, if no saved filter exists, hide everything not in DEFAULT_VISIBLE_STATUSES
+  useEffect(() => {
+    if (hiddenStatuses === null && allStatuses.length > 0) {
+      const toHide = allStatuses.filter(
+        (s) => !DEFAULT_VISIBLE_STATUSES.some(
+          (v) => s.toLowerCase().includes(v.toLowerCase())
+        )
+      );
+      setHiddenStatuses(toHide);
+      try { localStorage.setItem("pb_hidden_statuses", JSON.stringify(toHide)); } catch (_) {}
+    }
+  }, [allStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Use empty array if still null (before allStatuses loads)
+  const activeHiddenStatuses = hiddenStatuses ?? [];
+
   const toggleStatus = (statusName) => {
     setHiddenStatuses((prev) => {
-      const next = prev.includes(statusName)
-        ? prev.filter((s) => s !== statusName)
-        : [...prev, statusName];
+      const current = prev ?? [];
+      const next = current.includes(statusName)
+        ? current.filter((s) => s !== statusName)
+        : [...current, statusName];
       try { localStorage.setItem("pb_hidden_statuses", JSON.stringify(next)); } catch (_) {}
       return next;
     });
@@ -516,7 +539,7 @@ function RoadmapBoard({ releases, features, onReload }) {
     for (const f of features) {
       if (f.archived) continue;
       // Apply status filter
-      if (hiddenStatuses.includes(f.status?.name)) continue;
+      if (activeHiddenStatuses.includes(f.status?.name)) continue;
       const releaseInfo = f._releaseId ? releaseHorizonMap[f._releaseId] : null;
       if (releaseInfo) {
         grouped[releaseInfo.horizon].features.push(f);
@@ -588,7 +611,7 @@ function RoadmapBoard({ releases, features, onReload }) {
           <button className="btn btn-sm" onClick={onReload}>Refresh</button>
           <div className="status-filter-wrap">
             <button className="btn btn-sm" onClick={() => setShowStatusFilter((v) => !v)}>
-              Status {hiddenStatuses.length > 0 ? `(${hiddenStatuses.length} hidden)` : "filter"}
+              Status {activeHiddenStatuses.length > 0 ? `(${activeHiddenStatuses.length} hidden)` : "filter"}
             </button>
             {showStatusFilter && (
               <div className="status-filter-dropdown">
@@ -599,17 +622,17 @@ function RoadmapBoard({ releases, features, onReload }) {
                   <label key={s} className="status-filter-item">
                     <input
                       type="checkbox"
-                      checked={!hiddenStatuses.includes(s)}
+                      checked={!activeHiddenStatuses.includes(s)}
                       onChange={() => toggleStatus(s)}
                     />
                     <span className={`card-status ${statusClass(s)}`}>{s}</span>
                   </label>
                 ))}
-                {hiddenStatuses.length > 0 && (
+                {activeHiddenStatuses.length > 0 && (
                   <button
                     className="btn btn-sm"
                     style={{ width: "100%", marginTop: 8 }}
-                    onClick={() => { setHiddenStatuses([]); localStorage.removeItem("pb_hidden_statuses"); }}
+                    onClick={() => { setHiddenStatuses([]); try { localStorage.setItem("pb_hidden_statuses", "[]"); } catch(_){} }}
                   >
                     Show all
                   </button>
