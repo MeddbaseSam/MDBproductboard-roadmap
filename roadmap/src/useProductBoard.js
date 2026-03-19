@@ -66,7 +66,7 @@ async function fetchAllFeatures(onProgress) {
 
   do {
     onProgress(`Fetching features (page ${page})…`);
-    let path = "/features?sort=name&limit=100";
+    let path = "/features?sort=name";
     if (cursor) path += `&pageCursor=${encodeURIComponent(cursor)}`;
 
     const response = await pbFetch(path);
