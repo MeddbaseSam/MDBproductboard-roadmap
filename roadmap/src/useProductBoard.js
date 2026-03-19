@@ -1,8 +1,9 @@
 /**
  * useProductBoard.js
  *
- * v1 API for features, releases, release assignments, custom fields.
- * v2 API for team data (not available in v1).
+ * Uses ProductBoard API v1 throughout.
+ * Teams are derived from components — each feature belongs to a component
+ * (PAS, Platform, EHR etc.) which is fetched via /features?componentId=
  */
 
 import { useState, useCallback } from "react";
@@ -56,7 +57,6 @@ async function fetchAllPages(firstPath, onProgress, label) {
 
 async function findCVPFieldId() {
   try {
-    // Fetch each type separately to avoid bracket encoding issues
     const types = ["text", "number", "dropdown", "textarea"];
     for (const type of types) {
       const res = await pbFetch(`/hierarchy-entities/custom-fields?type=${type}`);
@@ -89,7 +89,6 @@ async function fetchCVPValues(cvpFieldId) {
     for (const item of items) {
       const featureId = item.hierarchyEntity?.id;
       if (!featureId) continue;
-      // Text fields return item.value, dropdowns return item.option.label
       const val = item.value ?? item.option?.label ?? null;
       if (val !== null && val !== undefined && String(val).trim()) {
         map[featureId] = String(val).trim();
@@ -103,31 +102,39 @@ async function fetchCVPValues(cvpFieldId) {
   }
 }
 
-// ─── Teams from v2 ───────────────────────────────────────────────────────────
+// ─── Component → feature map (v1) ────────────────────────────────────────────
+// Fetches all components, then queries features per component to build
+// a reliable featureId -> componentName map using v1 IDs throughout.
 
-async function fetchTeamMap() {
+async function fetchComponentFeatureMap(onProgress) {
   try {
-    const map = {};
-    let nextPath = "/v2/entities?type%5B%5D=feature";
-    while (nextPath) {
-      const response = await pbFetch(nextPath);
-      const items = response.data ?? [];
-      for (const entity of items) {
-        const teams = entity.fields?.teams ?? [];
-        if (teams.length > 0 && teams[0].name) {
-          map[entity.id] = teams[0].name;
+    const components = await fetchAllPages("/components", null, "components");
+    console.log(`Found ${components.length} components`);
+
+    const map = {}; // featureId -> componentName
+    for (const component of components) {
+      let nextPath = `/features?componentId=${component.id}`;
+      while (nextPath) {
+        const response = await pbFetch(nextPath);
+        const features = response.data ?? [];
+        for (const f of features) {
+          map[f.id] = component.name;
+        }
+        const next = response.links?.next;
+        if (next) {
+          try {
+            const parsed = new URL(next);
+            nextPath = parsed.pathname + parsed.search;
+          } catch (_) { nextPath = null; }
+        } else {
+          nextPath = null;
         }
       }
-      const meta = response.metadata ?? response.meta ?? {};
-      const cursor = meta.cursor?.next ?? null;
-      nextPath = cursor
-        ? `/v2/entities?type%5B%5D=feature&cursor=${encodeURIComponent(cursor)}`
-        : null;
     }
-    console.log(`Loaded teams for ${Object.keys(map).length} features`);
+    console.log(`Mapped ${Object.keys(map).length} features to components`);
     return map;
   } catch (e) {
-    console.warn("Could not fetch team data:", e.message);
+    console.warn("Could not fetch component map:", e.message);
     return {};
   }
 }
