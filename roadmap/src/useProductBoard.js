@@ -5,7 +5,7 @@
  *
  * Fetches:
  *  1. All releases (GET /releases)
- *  2. All feature-release assignments (GET /features/release-assignments)
+ *  2. All feature-release assignments (GET /feature-release-assignments)
  *  3. All features (GET /features)
  *  4. The "Customer Value Proposition" custom field ID, then values per feature
  *
@@ -114,7 +114,7 @@ async function loadAll(onProgress) {
   // Step 2: fetch features and release assignments in parallel
   const [features, assignments] = await Promise.all([
     fetchAllPages("/features", onProgress, "features"),
-    fetchAllPages("/features/release-assignments", null, "release assignments"),
+    fetchAllPages("/feature-release-assignments", null, "release assignments"),
   ]);
 
   // Step 3: fetch CVP values
