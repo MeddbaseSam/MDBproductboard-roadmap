@@ -137,16 +137,18 @@ async function fetchTeamMap() {
 async function loadAll(onProgress) {
   onProgress("Loading releases and field definitions...");
 
-  const [releases, cvpFieldId, teamMap] = await Promise.all([
+  const [releases, cvpFieldId] = await Promise.all([
     fetchAllPages("/releases", null, "releases"),
     findCVPFieldId(),
-    fetchTeamMap(),
   ]);
 
   const [features, assignments] = await Promise.all([
     fetchAllPages("/features", onProgress, "features"),
     fetchAllPages("/feature-release-assignments", null, "release assignments"),
   ]);
+
+  onProgress("Loading component assignments...");
+  const teamMap = await fetchComponentFeatureMap(onProgress);
 
   onProgress("Loading custom field values...");
   const cvpMap = await fetchCVPValues(cvpFieldId);
@@ -163,7 +165,7 @@ async function loadAll(onProgress) {
     ...f,
     _releaseId: featureReleaseMap[f.id] ?? null,
     _cvp: cvpMap[f.id] ?? null,
-    _team: teamMap[f.name?.toLowerCase().trim()] ?? null,
+    _team: teamMap[f.id] ?? null,
   }));
 
   const sortedReleases = [...releases].sort((a, b) => {
