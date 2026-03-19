@@ -219,24 +219,24 @@ function SettingsPanel({ mapping, onSave, onClose }) {
 // ─── PPT Export ───────────────────────────────────────────────────────────────
 
 const HORIZON_COLORS = {
-  now:   { accent: "#1D9E75", bg: "#E1F5EE", text: "#085041", dot: "#1D9E75" },
-  next:  { accent: "#185FA5", bg: "#E6F1FB", text: "#0C447C", dot: "#185FA5" },
-  later: { accent: "#888780", bg: "#F1EFE8", text: "#444441", dot: "#888780" },
+  now:   { accent: "#dc3b42", bg: "#FBEAEA", text: "#b02e34", dot: "#dc3b42", header: "#0D2B45" },
+  next:  { accent: "#00A896", bg: "#E6F7F5", text: "#007A6E", dot: "#00A896", header: "#0D2B45" },
+  later: { accent: "#4A6278", bg: "#EDF2F7", text: "#2E3F4F", dot: "#4A6278", header: "#0D2B45" },
 };
 
 const STATUS_COLORS = {
-  "in progress":  { bg: "#E6F1FB", color: "#0C447C" },
-  "in development": { bg: "#E6F1FB", color: "#0C447C" },
-  "defined":      { bg: "#E6F1FB", color: "#0C447C" },
-  "validated":    { bg: "#E6F1FB", color: "#0C447C" },
-  "delivered":    { bg: "#E1F5EE", color: "#085041" },
-  "done":         { bg: "#E1F5EE", color: "#085041" },
-  "released":     { bg: "#E1F5EE", color: "#085041" },
-  "backlog":      { bg: "#F1EFE8", color: "#444441" },
-  "candidate":    { bg: "#F1EFE8", color: "#444441" },
-  "idea":         { bg: "#F1EFE8", color: "#444441" },
-  "parked":       { bg: "#fff3f3", color: "#991b1b" },
-  "blocked":      { bg: "#fff3f3", color: "#991b1b" },
+  "in progress":    { bg: "#E8F3FB", color: "#0D4F7A" },
+  "in development": { bg: "#E8F3FB", color: "#0D4F7A" },
+  "defined":        { bg: "#E8F3FB", color: "#0D4F7A" },
+  "validated":      { bg: "#E8F3FB", color: "#0D4F7A" },
+  "delivered":      { bg: "#FBEAEA", color: "#b02e34" },
+  "done":           { bg: "#FBEAEA", color: "#b02e34" },
+  "released":       { bg: "#FBEAEA", color: "#b02e34" },
+  "backlog":        { bg: "#EDF2F7", color: "#2E3F4F" },
+  "candidate":      { bg: "#EDF2F7", color: "#2E3F4F" },
+  "idea":           { bg: "#EDF2F7", color: "#2E3F4F" },
+  "parked":         { bg: "#FEF2F2", color: "#991B1B" },
+  "blocked":        { bg: "#FEF2F2", color: "#991B1B" },
 };
 
 function getStatusStyle(statusName) {
@@ -286,19 +286,18 @@ function buildSlideHTML(horizon, features, releaseNames) {
     const featureCards = teamFeatures.map((f) => {
       const status = f.status?.name ?? "";
       const sc = getStatusStyle(status);
-      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.45;color:#6b6965;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${f._cvp}</div>` : "";
-      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${sc.bg};color:${sc.color};text-transform:capitalize;">${status}</span>` : "";
-      const teamBadge = f._team ? `<span style="font-size:10px;color:#888780;background:#f1efe8;border:0.5px solid #d3d1c7;border-radius:20px;padding:2px 8px;">${f._team}</span>` : "";
+      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.45;color:#4A6278;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${f._cvp}</div>` : "";
+      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${sc.bg};color:${sc.color};text-transform:capitalize;">${status}</span>` : "";
+      const teamBadge = f._team ? `<span style="font-size:10px;color:#4A6278;background:#EDF2F7;border:0.5px solid #DDE4EC;border-radius:4px;padding:2px 7px;">${f._team}</span>` : "";
       const footer = (statusBadge || teamBadge) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">${statusBadge}${teamBadge}</div>` : "";
-      return `<div style="background:#fff;border:1px solid #e8e6e1;border-radius:10px;padding:${CARD_PAD}px;margin-bottom:8px;position:relative;overflow:hidden;">
-        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${c.accent};border-radius:10px 10px 0 0;"></div>
-        <div style="font-size:12.5px;font-weight:600;line-height:1.35;color:#1a1917;margin-bottom:6px;margin-top:4px;">${f.name}</div>
+      return `<div style="background:#ffffff;border:1px solid #DDE4EC;border-left:3px solid ${c.accent};border-radius:6px;padding:${CARD_PAD}px;margin-bottom:8px;">
+        <div style="font-size:12.5px;font-weight:600;line-height:1.35;color:#0D2B45;margin-bottom:6px;">${f.name}</div>
         ${cvp}${footer}
       </div>`;
     }).join("");
 
     return `<div style="break-inside:avoid;margin-bottom:16px;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a09d98;margin-bottom:6px;padding-left:2px;">${teamName}</div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;color:#8A9BAA;margin-bottom:6px;padding-left:2px;padding-bottom:4px;border-bottom:1px solid #DDE4EC;">${teamName}</div>
       ${featureCards}
     </div>`;
   }).join("");
@@ -308,21 +307,25 @@ function buildSlideHTML(horizon, features, releaseNames) {
     : "";
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: ${SLIDE_W}px; height: ${SLIDE_H}px; overflow: hidden; background: #fafaf9; font-family: system-ui, -apple-system, sans-serif; }
+    body { width: ${SLIDE_W}px; height: ${SLIDE_H}px; overflow: hidden; background: #F4F7FA; font-family: 'Inter', system-ui, sans-serif; }
   </style>
   </head><body>
-  <div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:#fafaf9;padding:40px 48px;display:flex;flex-direction:column;">
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:28px;border-bottom:2px solid ${c.accent};padding-bottom:20px;">
-      <div style="width:14px;height:14px;border-radius:50%;background:${c.dot};flex-shrink:0;"></div>
+  <div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:#F4F7FA;display:flex;flex-direction:column;">
+    <div style="background:#0D2B45;padding:28px 48px 24px;display:flex;align-items:center;gap:16px;border-bottom:4px solid #dc3b42;">
+      <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" style="height:32px;object-fit:contain;flex-shrink:0;filter:brightness(0) invert(1);" crossorigin="anonymous" />
       <div>
-        <div style="font-size:32px;font-weight:700;color:#1a1917;letter-spacing:-0.5px;">${label}</div>
-        ${releaseSubtitle}
+        <div style="font-size:28px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;line-height:1.1;">${label}</div>
+        ${releaseSubtitle ? `<div style="font-size:13px;color:rgba(255,255,255,0.6);margin-top:3px;">${releaseNames.join(" · ")}</div>` : ""}
       </div>
-      <div style="margin-left:auto;font-size:12px;color:#a09d98;">${date} · ${features.length} features</div>
+      <div style="margin-left:auto;text-align:right;">
+        <div style="font-size:12px;color:rgba(255,255,255,0.5);">${date}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:2px;">${features.length} features</div>
+      </div>
     </div>
-    <div style="flex:1;overflow:hidden;columns:${cols};column-gap:${COL_GAP}px;">
+    <div style="flex:1;overflow:hidden;padding:24px 48px;columns:${cols};column-gap:${COL_GAP}px;">
       ${cardsHTML}
     </div>
   </div>
@@ -490,8 +493,11 @@ function RoadmapBoard({ releases, features, onReload }) {
 
       <div className="header">
         <div className="header-brand">
-          <div className="header-logo"><span>PB</span></div>
-          <span className="header-title">Now · Next · Later</span>
+          <div className="header-logo-img">
+            <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" />
+          </div>
+          <span className="header-divider" />
+          <span className="header-title">Product Roadmap</span>
         </div>
         <div className="header-actions">
           <span className="roadmap-count">
