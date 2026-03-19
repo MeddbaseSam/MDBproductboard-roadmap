@@ -216,25 +216,179 @@ function SettingsPanel({ mapping, onSave, onClose }) {
   );
 }
 
-// ─── Export helper ────────────────────────────────────────────────────────────
+// ─── PPT Export ───────────────────────────────────────────────────────────────
 
-async function exportBoardAsImage(boardRef) {
-  if (!window.html2canvas) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
+const HORIZON_COLORS = {
+  now:   { accent: "#1D9E75", bg: "#E1F5EE", text: "#085041", dot: "#1D9E75" },
+  next:  { accent: "#185FA5", bg: "#E6F1FB", text: "#0C447C", dot: "#185FA5" },
+  later: { accent: "#888780", bg: "#F1EFE8", text: "#444441", dot: "#888780" },
+};
+
+const STATUS_COLORS = {
+  "in progress":  { bg: "#E6F1FB", color: "#0C447C" },
+  "in development": { bg: "#E6F1FB", color: "#0C447C" },
+  "defined":      { bg: "#E6F1FB", color: "#0C447C" },
+  "validated":    { bg: "#E6F1FB", color: "#0C447C" },
+  "delivered":    { bg: "#E1F5EE", color: "#085041" },
+  "done":         { bg: "#E1F5EE", color: "#085041" },
+  "released":     { bg: "#E1F5EE", color: "#085041" },
+  "backlog":      { bg: "#F1EFE8", color: "#444441" },
+  "candidate":    { bg: "#F1EFE8", color: "#444441" },
+  "idea":         { bg: "#F1EFE8", color: "#444441" },
+  "parked":       { bg: "#fff3f3", color: "#991b1b" },
+  "blocked":      { bg: "#fff3f3", color: "#991b1b" },
+};
+
+function getStatusStyle(statusName) {
+  if (!statusName) return { bg: "#F1EFE8", color: "#444441" };
+  const key = statusName.toLowerCase();
+  for (const [k, v] of Object.entries(STATUS_COLORS)) {
+    if (key.includes(k)) return v;
   }
-  const canvas = await window.html2canvas(boardRef.current, {
-    scale: 2, useCORS: true, backgroundColor: "#fafaf9", logging: false,
+  return { bg: "#F1EFE8", color: "#444441" };
+}
+
+function buildSlideHTML(horizon, features, releaseNames) {
+  const c = HORIZON_COLORS[horizon];
+  const label = { now: "Now", next: "Next", later: "Later" }[horizon];
+  const date = new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+
+  // Group by team
+  const teamGroups = {};
+  for (const f of features) {
+    const team = f._team ?? "No team";
+    if (!teamGroups[team]) teamGroups[team] = [];
+    teamGroups[team].push(f);
+  }
+  const sortedTeams = Object.entries(teamGroups).sort(([a], [b]) => {
+    if (a === "No team") return 1;
+    if (b === "No team") return -1;
+    return a.localeCompare(b);
   });
+
+  const CARD_W = 340;
+  const CARD_PAD = 16;
+  const SLIDE_W = 1920;
+  const SLIDE_H = 1080;
+  const HEADER_H = 100;
+  const COL_GAP = 24;
+  const TEAM_HEADER_H = 28;
+  const CARD_MIN_H = 90;
+  const CVP_LINE_H = 16;
+  const MAX_CVP_LINES = 3;
+
+  // Calculate how many columns fit
+  const availW = SLIDE_W - 96;
+  const cols = Math.max(1, Math.floor((availW + COL_GAP) / (CARD_W + COL_GAP)));
+
+  // Build cards HTML
+  const cardsHTML = sortedTeams.map(([teamName, teamFeatures]) => {
+    const featureCards = teamFeatures.map((f) => {
+      const status = f.status?.name ?? "";
+      const sc = getStatusStyle(status);
+      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.45;color:#6b6965;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${f._cvp}</div>` : "";
+      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${sc.bg};color:${sc.color};text-transform:capitalize;">${status}</span>` : "";
+      const teamBadge = f._team ? `<span style="font-size:10px;color:#888780;background:#f1efe8;border:0.5px solid #d3d1c7;border-radius:20px;padding:2px 8px;">${f._team}</span>` : "";
+      const footer = (statusBadge || teamBadge) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">${statusBadge}${teamBadge}</div>` : "";
+      return `<div style="background:#fff;border:1px solid #e8e6e1;border-radius:10px;padding:${CARD_PAD}px;margin-bottom:8px;position:relative;overflow:hidden;">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${c.accent};border-radius:10px 10px 0 0;"></div>
+        <div style="font-size:12.5px;font-weight:600;line-height:1.35;color:#1a1917;margin-bottom:6px;margin-top:4px;">${f.name}</div>
+        ${cvp}${footer}
+      </div>`;
+    }).join("");
+
+    return `<div style="break-inside:avoid;margin-bottom:16px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a09d98;margin-bottom:6px;padding-left:2px;">${teamName}</div>
+      ${featureCards}
+    </div>`;
+  }).join("");
+
+  const releaseSubtitle = releaseNames.length > 0
+    ? `<div style="font-size:13px;color:${c.text};opacity:0.7;margin-top:4px;">${releaseNames.join(" · ")}</div>`
+    : "";
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: ${SLIDE_W}px; height: ${SLIDE_H}px; overflow: hidden; background: #fafaf9; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+  </head><body>
+  <div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:#fafaf9;padding:40px 48px;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:28px;border-bottom:2px solid ${c.accent};padding-bottom:20px;">
+      <div style="width:14px;height:14px;border-radius:50%;background:${c.dot};flex-shrink:0;"></div>
+      <div>
+        <div style="font-size:32px;font-weight:700;color:#1a1917;letter-spacing:-0.5px;">${label}</div>
+        ${releaseSubtitle}
+      </div>
+      <div style="margin-left:auto;font-size:12px;color:#a09d98;">${date} · ${features.length} features</div>
+    </div>
+    <div style="flex:1;overflow:hidden;columns:${cols};column-gap:${COL_GAP}px;">
+      ${cardsHTML}
+    </div>
+  </div>
+  </body></html>`;
+}
+
+async function loadLib(src) {
+  if (document.querySelector(`script[src="${src}"]`) && window[src.includes("jszip") ? "JSZip" : "html2canvas"]) return;
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function exportSlidesAsZip(grouped) {
+  await Promise.all([
+    loadLib("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"),
+    loadLib("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"),
+  ]);
+
+  const zip = new window.JSZip();
+  const date = new Date().toISOString().slice(0, 10);
+
+  for (const horizon of ["now", "next", "later"]) {
+    const { features, releaseNames } = grouped[horizon];
+    if (features.length === 0) continue;
+
+    // Create an off-screen iframe to render the slide
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1920px;height:1080px;border:none;visibility:hidden;";
+    document.body.appendChild(iframe);
+
+    const html = buildSlideHTML(horizon, features, releaseNames);
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+
+    // Wait for fonts/layout
+    await new Promise((r) => setTimeout(r, 600));
+
+    const canvas = await window.html2canvas(iframe.contentDocument.body, {
+      width: 1920,
+      height: 1080,
+      scale: 1,
+      useCORS: true,
+      backgroundColor: "#fafaf9",
+      logging: false,
+      windowWidth: 1920,
+      windowHeight: 1080,
+    });
+
+    document.body.removeChild(iframe);
+
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    zip.file(`roadmap-${horizon}-${date}.png`, blob);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
   const link = document.createElement("a");
-  link.download = `roadmap-${new Date().toISOString().slice(0, 10)}.png`;
-  link.href = canvas.toDataURL("image/png");
+  link.download = `roadmap-slides-${date}.zip`;
+  link.href = URL.createObjectURL(zipBlob);
   link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 // ─── Roadmap Board ────────────────────────────────────────────────────────────
@@ -249,7 +403,7 @@ function RoadmapBoard({ releases, features, onReload }) {
     catch (_) { return []; }
   });
   const [showStatusFilter, setShowStatusFilter] = useState(false);
-  const boardRef = useRef(null);
+  const boardRef = useRef(null); // kept for future use
 
   // Collect all unique statuses from features for the filter UI
   const allStatuses = useMemo(() => {
@@ -319,7 +473,7 @@ function RoadmapBoard({ releases, features, onReload }) {
 
   const handleExport = async () => {
     setExporting(true);
-    try { await exportBoardAsImage(boardRef); }
+    try { await exportSlidesAsZip(grouped); }
     catch (e) { alert("Export failed: " + e.message); }
     finally { setExporting(false); }
   };
@@ -349,12 +503,12 @@ function RoadmapBoard({ releases, features, onReload }) {
             </button>
           )}
           <button className="btn btn-sm" onClick={handleExport} disabled={exporting}>
-            {exporting ? "Exporting…" : (
+            {exporting ? "Generating slides…" : (
               <>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                   <path d="M6 1v7M3.5 5.5L6 8l2.5-2.5M1 9.5V11h10V9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
-                Export PNG
+                Export slides
               </>
             )}
           </button>
@@ -394,7 +548,7 @@ function RoadmapBoard({ releases, features, onReload }) {
         </div>
       </div>
 
-      <div className="roadmap-body" ref={boardRef}>
+      <div className="roadmap-body">
         {unmapped.length > 0 && showUnmapped && (
           <div className="unmapped-notice">
             <strong>{unmapped.length} features</strong> belong to releases not mapped to a horizon.
