@@ -126,13 +126,8 @@ function Column({ horizon, features, releaseNames }) {
         <div className="column-label">
           <div className={`column-label-dot ${horizon}`} />
           <div>
-            <span className="column-name">{HORIZON_LABELS[horizon]}</span>
-            {releaseNames.length > 0 && (
-              <span className="column-releases">
-                {releaseNames.join(" · ")}
-              </span>
-            )}
-          </div>
+  <span className="column-name">{HORIZON_LABELS[horizon]}</span>
+</div>
         </div>
         <span className="column-count">{features.length}</span>
       </div>
