@@ -366,11 +366,16 @@ export default function App() {
   const { status, features, error, progress, load, reset } = useProductBoard();
   const [mapping, setMapping] = useState(() => loadSavedMapping() || DEFAULT_MAPPING);
 
-  // Auto-load on first render
+  const handleReload = useCallback(() => {
+    reset();
+    setTimeout(() => load(), 0);
+  }, [load, reset]);
+
   useEffect(() => {
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   return (
     <div className="app">
       {status === "idle" && <LoadingScreen message="Starting…" />}
