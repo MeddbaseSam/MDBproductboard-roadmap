@@ -248,12 +248,98 @@ function getStatusStyle(statusName) {
   return { bg: "#F1EFE8", color: "#444441" };
 }
 
-function buildSlideHTML(horizon, features, releaseNames) {
+// ─── Slide layout constants ───────────────────────────────────────────────────
+
+const SLIDE_W = 1920;
+const SLIDE_H = 1080;
+const HEADER_H = 76;          // header bar height
+const PADDING_H = 44;         // top + bottom padding in content area
+const PADDING_W = 96;         // left + right total padding
+const COL_GAP = 20;           // gap between team columns
+const CARD_PAD = 14;          // inner card padding
+const CARD_MB = 8;            // card margin-bottom
+const TEAM_HEADER_H = 32;     // team label + border
+const CARD_BASE_H = 52;       // card with just name + status (no CVP)
+const CVP_LINE_H = 17;        // height per CVP line
+const CVP_MAX_LINES = 2;      // max CVP lines shown
+const MAX_COLS = 6;           // max team columns per slide
+
+const CONTENT_H = SLIDE_H - HEADER_H - PADDING_H;
+
+// Estimate card height based on whether it has CVP
+function estimateCardH(f) {
+  const cvpLines = f._cvp ? CVP_MAX_LINES : 0;
+  return CARD_BASE_H + (cvpLines * CVP_LINE_H) + CARD_MB;
+}
+
+// Escape HTML special chars
+function esc(str) {
+  return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// Build HTML for a single card
+function cardHTML(f, accent) {
+  const status = f.status?.name ?? "";
+  const sc = getStatusStyle(status);
+  const cvp = f._cvp
+    ? `<div style="font-size:11px;line-height:1.5;color:#4A6278;margin-bottom:7px;display:-webkit-box;-webkit-line-clamp:${CVP_MAX_LINES};-webkit-box-orient:vertical;overflow:hidden;">${esc(f._cvp)}</div>`
+    : "";
+  const badge = status
+    ? `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${sc.bg};color:${sc.color};text-transform:capitalize;display:inline-block;">${esc(status)}</span>`
+    : "";
+  return `<div style="background:#fff;border:1px solid #DDE4EC;border-left:3px solid ${accent};border-radius:6px;padding:${CARD_PAD}px;margin-bottom:${CARD_MB}px;">
+    <div style="font-size:12px;font-weight:600;line-height:1.4;color:#0D2B45;margin-bottom:5px;">${esc(f.name)}</div>
+    ${cvp}${badge}
+  </div>`;
+}
+
+// Build the header HTML (reused across all slides for a horizon)
+function headerHTML(label, releaseNames, totalFeatures, date, slideNum, totalSlides) {
+  const pageLabel = totalSlides > 1 ? ` · Slide ${slideNum} of ${totalSlides}` : "";
+  return `<div style="background:#0D2B45;padding:18px 48px 16px;display:flex;align-items:center;gap:20px;border-bottom:4px solid #dc3b42;flex-shrink:0;height:${HEADER_H}px;box-sizing:border-box;">
+    <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" style="height:26px;object-fit:contain;flex-shrink:0;filter:brightness(0) invert(1);" crossorigin="anonymous" />
+    <div style="width:1px;height:22px;background:rgba(255,255,255,0.2);flex-shrink:0;"></div>
+    <div style="display:flex;align-items:baseline;gap:12px;">
+      <span style="font-size:24px;font-weight:700;color:#fff;letter-spacing:-0.3px;">${label}</span>
+      ${releaseNames.length > 0 ? `<span style="font-size:12px;color:rgba(255,255,255,0.5);">${releaseNames.join(" · ")}</span>` : ""}
+    </div>
+    <div style="margin-left:auto;text-align:right;">
+      <div style="font-size:11px;color:rgba(255,255,255,0.45);">${date}${pageLabel}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;">${totalFeatures} features</div>
+    </div>
+  </div>`;
+}
+
+// Wrap content into a full 1920x1080 slide HTML document
+function wrapSlide(headerHtml, bodyHtml) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>* { box-sizing:border-box; margin:0; padding:0; } body { width:${SLIDE_W}px; height:${SLIDE_H}px; overflow:hidden; background:#F4F7FA; font-family:'Inter',system-ui,sans-serif; }</style>
+  </head><body>
+  <div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:#F4F7FA;display:flex;flex-direction:column;">
+    ${headerHtml}
+    <div style="flex:1;overflow:hidden;padding:20px 48px 24px;display:flex;flex-direction:row;gap:${COL_GAP}px;align-items:flex-start;">
+      ${bodyHtml}
+    </div>
+  </div>
+  </body></html>`;
+}
+
+/**
+ * Paginate features into slides.
+ *
+ * Strategy:
+ *  - One column per team, up to MAX_COLS columns per slide.
+ *  - If a team has more cards than fit in CONTENT_H, split that team
+ *    across multiple slides (continuing label shown).
+ *  - Column width is always (SLIDE_W - PADDING_W - (numCols-1)*COL_GAP) / numCols.
+ */
+function paginateIntoSlides(horizon, features, releaseNames) {
   const c = HORIZON_COLORS[horizon];
   const label = { now: "Now", next: "Next", later: "Later" }[horizon];
   const date = new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
-  // Group by team, sort alphabetically, No team last
+  // Group by team
   const teamGroups = {};
   for (const f of features) {
     const team = f._team ?? "No team";
@@ -266,62 +352,56 @@ function buildSlideHTML(horizon, features, releaseNames) {
     return a.localeCompare(b);
   });
 
-  // Build one column per team, laid out as a flex row
-  const CARD_PAD = 14;
-  const numTeams = sortedTeams.length;
-  // Spread teams evenly across the slide width
-  const colWidth = Math.floor((1920 - 96 - (numTeams - 1) * 20) / Math.max(numTeams, 1));
+  // For each team, calculate how many cards fit per column-height
+  // and split the team's features into page-sized chunks
+  const teamChunks = []; // [{ teamName, features[] }]
+  for (const [teamName, teamFeatures] of sortedTeams) {
+    let remaining = [...teamFeatures];
+    let isFirst = true;
+    while (remaining.length > 0) {
+      let usedH = TEAM_HEADER_H;
+      const batch = [];
+      for (const f of remaining) {
+        const h = estimateCardH(f);
+        if (usedH + h > CONTENT_H && batch.length > 0) break;
+        usedH += h;
+        batch.push(f);
+      }
+      teamChunks.push({ teamName: isFirst ? teamName : `${teamName} (cont.)`, features: batch });
+      remaining = remaining.slice(batch.length);
+      isFirst = false;
+    }
+  }
 
-  const teamCols = sortedTeams.map(([teamName, teamFeatures]) => {
-    const featureCards = teamFeatures.map((f) => {
-      const status = f.status?.name ?? "";
-      const sc = getStatusStyle(status);
-      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.5;color:#4A6278;margin-bottom:8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${f._cvp.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>` : "";
-      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${sc.bg};color:${sc.color};text-transform:capitalize;display:inline-block;">${status}</span>` : "";
-      return `<div style="background:#ffffff;border:1px solid #DDE4EC;border-left:3px solid ${c.accent};border-radius:6px;padding:${CARD_PAD}px;margin-bottom:8px;width:100%;">
-        <div style="font-size:12px;font-weight:600;line-height:1.4;color:#0D2B45;margin-bottom:5px;">${f.name.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
-        ${cvp}
-        ${statusBadge}
+  // Group chunks into slides of MAX_COLS columns each
+  const slideChunkGroups = [];
+  for (let i = 0; i < teamChunks.length; i += MAX_COLS) {
+    slideChunkGroups.push(teamChunks.slice(i, i + MAX_COLS));
+  }
+
+  const totalSlides = slideChunkGroups.length;
+
+  // Build HTML for each slide
+  return slideChunkGroups.map((chunks, slideIdx) => {
+    const numCols = chunks.length;
+    const colWidth = Math.floor((SLIDE_W - PADDING_W - (numCols - 1) * COL_GAP) / numCols);
+
+    const bodyCols = chunks.map(({ teamName, features: chunkFeatures }) => {
+      const cards = chunkFeatures.map((f) => cardHTML(f, c.accent)).join("");
+      return `<div style="width:${colWidth}px;flex-shrink:0;display:flex;flex-direction:column;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;color:#8A9BAA;padding-bottom:6px;margin-bottom:8px;border-bottom:2px solid ${c.accent};">${esc(teamName)}</div>
+        <div style="overflow:hidden;">${cards}</div>
       </div>`;
     }).join("");
 
-    return `<div style="width:${colWidth}px;flex-shrink:0;display:flex;flex-direction:column;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;color:#8A9BAA;padding-bottom:6px;margin-bottom:8px;border-bottom:2px solid ${c.accent};">${teamName}</div>
-      <div style="overflow:hidden;flex:1;">
-        ${featureCards}
-      </div>
-    </div>`;
-  }).join("");
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: 1920px; height: 1080px; overflow: hidden; background: #F4F7FA; font-family: 'Inter', system-ui, sans-serif; }
-  </style>
-  </head><body>
-  <div style="width:1920px;height:1080px;background:#F4F7FA;display:flex;flex-direction:column;">
-    <div style="background:#0D2B45;padding:22px 48px 20px;display:flex;align-items:center;gap:20px;border-bottom:4px solid #dc3b42;flex-shrink:0;">
-      <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" style="height:28px;object-fit:contain;flex-shrink:0;filter:brightness(0) invert(1);" crossorigin="anonymous" />
-      <div style="width:1px;height:24px;background:rgba(255,255,255,0.2);flex-shrink:0;"></div>
-      <div style="display:flex;align-items:baseline;gap:12px;">
-        <span style="font-size:26px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">${label}</span>
-        ${releaseNames.length > 0 ? `<span style="font-size:13px;color:rgba(255,255,255,0.55);">${releaseNames.join(" · ")}</span>` : ""}
-      </div>
-      <div style="margin-left:auto;text-align:right;">
-        <div style="font-size:12px;color:rgba(255,255,255,0.5);">${date}</div>
-        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:2px;">${features.length} features across ${sortedTeams.length} team${sortedTeams.length !== 1 ? "s" : ""}</div>
-      </div>
-    </div>
-    <div style="flex:1;overflow:hidden;padding:20px 48px 24px;display:flex;flex-direction:row;gap:20px;align-items:flex-start;">
-      ${teamCols}
-    </div>
-  </div>
-  </body></html>`;
+    const hdr = headerHTML(label, releaseNames, features.length, date, slideIdx + 1, totalSlides);
+    return wrapSlide(hdr, bodyCols);
+  });
 }
 
 async function loadLib(src) {
-  if (document.querySelector(`script[src="${src}"]`) && window[src.includes("jszip") ? "JSZip" : "html2canvas"]) return;
+  const key = src.includes("jszip") ? "JSZip" : "html2canvas";
+  if (window[key]) return;
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = src;
@@ -329,6 +409,23 @@ async function loadLib(src) {
     s.onerror = reject;
     document.head.appendChild(s);
   });
+}
+
+async function captureIframe(html) {
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = `position:fixed;left:-9999px;top:-9999px;width:${SLIDE_W}px;height:${SLIDE_H}px;border:none;visibility:hidden;`;
+  document.body.appendChild(iframe);
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+  await new Promise((r) => setTimeout(r, 700)); // wait for fonts
+  const canvas = await window.html2canvas(iframe.contentDocument.body, {
+    width: SLIDE_W, height: SLIDE_H, scale: 1,
+    useCORS: true, backgroundColor: "#F4F7FA",
+    logging: false, windowWidth: SLIDE_W, windowHeight: SLIDE_H,
+  });
+  document.body.removeChild(iframe);
+  return canvas;
 }
 
 async function exportSlidesAsZip(grouped) {
@@ -339,39 +436,21 @@ async function exportSlidesAsZip(grouped) {
 
   const zip = new window.JSZip();
   const date = new Date().toISOString().slice(0, 10);
+  let fileIndex = 1;
 
   for (const horizon of ["now", "next", "later"]) {
     const { features, releaseNames } = grouped[horizon];
     if (features.length === 0) continue;
 
-    // Create an off-screen iframe to render the slide
-    const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:1920px;height:1080px;border:none;visibility:hidden;";
-    document.body.appendChild(iframe);
+    const slides = paginateIntoSlides(horizon, features, releaseNames);
 
-    const html = buildSlideHTML(horizon, features, releaseNames);
-    iframe.contentDocument.open();
-    iframe.contentDocument.write(html);
-    iframe.contentDocument.close();
-
-    // Wait for fonts/layout
-    await new Promise((r) => setTimeout(r, 600));
-
-    const canvas = await window.html2canvas(iframe.contentDocument.body, {
-      width: 1920,
-      height: 1080,
-      scale: 1,
-      useCORS: true,
-      backgroundColor: "#fafaf9",
-      logging: false,
-      windowWidth: 1920,
-      windowHeight: 1080,
-    });
-
-    document.body.removeChild(iframe);
-
-    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
-    zip.file(`roadmap-${horizon}-${date}.png`, blob);
+    for (let i = 0; i < slides.length; i++) {
+      const canvas = await captureIframe(slides[i]);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const suffix = slides.length > 1 ? `-${i + 1}of${slides.length}` : "";
+      zip.file(`${String(fileIndex).padStart(2,"0")}-roadmap-${horizon}${suffix}-${date}.png`, blob);
+      fileIndex++;
+    }
   }
 
   const zipBlob = await zip.generateAsync({ type: "blob" });
