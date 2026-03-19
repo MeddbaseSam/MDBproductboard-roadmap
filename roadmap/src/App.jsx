@@ -369,13 +369,8 @@ export default function App() {
   // Auto-load on first render
   useEffect(() => {
     load();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleReload = useCallback(() => {
-    reset();
-    setTimeout(() => load(), 0);
-  }, [load, reset]);
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div className="app">
       {status === "idle" && <LoadingScreen message="Starting…" />}
