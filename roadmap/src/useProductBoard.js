@@ -266,8 +266,7 @@ export function useProductBoard() {
       );
       setState({ status: "success", releases, features, objectives, error: null, progress: "" });
     } catch (err) {
-      setState({ status: "error", releases: [], features: [], error: err.message, progress: "" });
-    }
+setState({ status: "error", releases: [], features: [], objectives: [], error: err.stack ?? err.message, progress: "" });    }
   }, []);
 
   const reset = useCallback(() => {

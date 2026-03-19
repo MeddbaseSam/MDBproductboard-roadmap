@@ -757,8 +757,7 @@ export default function App() {
     <div className="app">
       {status === "idle" && <LoadingScreen message="Starting…" />}
       {status === "loading" && <LoadingScreen message={progress} />}
-      {status === "error" && <ErrorScreen message={error} onRetry={handleReload} />}
-      {status === "success" && (
+{status === "error" && <ErrorScreen message={error + " | " + JSON.stringify(error)} onRetry={handleReload} />}      {status === "success" && (
         <RoadmapBoard
           releases={releases}
           features={features}
