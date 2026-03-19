@@ -261,12 +261,13 @@ export function useProductBoard() {
   const load = useCallback(async () => {
     setState({ status: "loading", releases: [], features: [], error: null, progress: "Connecting..." });
     try {
-      const { releases, features } = await loadAll((msg) =>
+      const { releases, features, objectives } = await loadAll((msg) =>
         setState((s) => ({ ...s, progress: msg }))
       );
       setState({ status: "success", releases, features, objectives, error: null, progress: "" });
     } catch (err) {
-setState({ status: "error", releases: [], features: [], objectives: [], error: err.stack ?? err.message, progress: "" });    }
+      setState({ status: "error", releases: [], features: [], error: err.message, progress: "" });
+    }
   }, []);
 
   const reset = useCallback(() => {
