@@ -2,8 +2,11 @@
  * useProductBoard.js
  *
  * Uses ProductBoard API v1 throughout.
- * Teams are derived from components — each feature belongs to a component
- * (PAS, Platform, EHR etc.) which is fetched via /features?componentId=
+ *
+ * Component (team) assignment:
+ *  - Features of type "feature" have parent.component.id directly
+ *  - Features of type "subfeature" have parent.feature.id
+ *    → look up that parent feature to get its parent.component.id
  */
 
 import { useState, useCallback } from "react";
@@ -102,41 +105,59 @@ async function fetchCVPValues(cvpFieldId) {
   }
 }
 
-// ─── Component → feature map (v1) ────────────────────────────────────────────
-// Fetches all components, then queries features per component to build
-// a reliable featureId -> componentName map using v1 IDs throughout.
+// ─── Component map ────────────────────────────────────────────────────────────
 
-async function fetchComponentFeatureMap(onProgress) {
+async function fetchComponentMap() {
+  // Returns { [componentId]: componentName }
   try {
     const components = await fetchAllPages("/components", null, "components");
-    console.log(`Found ${components.length} components`);
-
-    const map = {}; // featureId -> componentName
-    for (const component of components) {
-      let nextPath = `/features?componentId=${component.id}`;
-      while (nextPath) {
-        const response = await pbFetch(nextPath);
-        const features = response.data ?? [];
-        for (const f of features) {
-          map[f.id] = component.name;
-        }
-        const next = response.links?.next;
-        if (next) {
-          try {
-            const parsed = new URL(next);
-            nextPath = parsed.pathname + parsed.search;
-          } catch (_) { nextPath = null; }
-        } else {
-          nextPath = null;
-        }
-      }
+    const map = {};
+    for (const c of components) {
+      map[c.id] = c.name;
     }
-    console.log(`Mapped ${Object.keys(map).length} features to components`);
+    console.log(`Loaded ${components.length} components`);
     return map;
   } catch (e) {
-    console.warn("Could not fetch component map:", e.message);
+    console.warn("Could not fetch components:", e.message);
     return {};
   }
+}
+
+// ─── Build featureId -> componentName ────────────────────────────────────────
+//
+// In v1:
+//  - type="feature"    → parent.component.id  (direct)
+//  - type="subfeature" → parent.feature.id    (need to look up parent)
+
+function buildTeamMap(features, componentMap) {
+  // First pass: map featureId -> componentId for top-level features
+  const featureComponentMap = {}; // featureId -> componentId
+
+  for (const f of features) {
+    if (f.type === "feature" && f.parent?.component?.id) {
+      featureComponentMap[f.id] = f.parent.component.id;
+    }
+  }
+
+  // Second pass: resolve subfeatures via their parent feature
+  for (const f of features) {
+    if (f.type === "subfeature" && f.parent?.feature?.id) {
+      const parentComponentId = featureComponentMap[f.parent.feature.id];
+      if (parentComponentId) {
+        featureComponentMap[f.id] = parentComponentId;
+      }
+    }
+  }
+
+  // Convert componentId -> componentName
+  const teamMap = {}; // featureId -> componentName
+  for (const [featureId, componentId] of Object.entries(featureComponentMap)) {
+    const componentName = componentMap[componentId];
+    if (componentName) teamMap[featureId] = componentName;
+  }
+
+  console.log(`Resolved teams for ${Object.keys(teamMap).length} of ${features.length} features`);
+  return teamMap;
 }
 
 // ─── Main load ────────────────────────────────────────────────────────────────
@@ -144,18 +165,16 @@ async function fetchComponentFeatureMap(onProgress) {
 async function loadAll(onProgress) {
   onProgress("Loading releases and field definitions...");
 
-  const [releases, cvpFieldId] = await Promise.all([
+  const [releases, cvpFieldId, componentMap] = await Promise.all([
     fetchAllPages("/releases", null, "releases"),
     findCVPFieldId(),
+    fetchComponentMap(),
   ]);
 
   const [features, assignments] = await Promise.all([
     fetchAllPages("/features", onProgress, "features"),
     fetchAllPages("/feature-release-assignments", null, "release assignments"),
   ]);
-
-  onProgress("Loading component assignments...");
-  const teamMap = await fetchComponentFeatureMap(onProgress);
 
   onProgress("Loading custom field values...");
   const cvpMap = await fetchCVPValues(cvpFieldId);
@@ -167,6 +186,10 @@ async function loadAll(onProgress) {
     const releaseId = a.release?.id ?? a.releaseId;
     if (featureId && releaseId) featureReleaseMap[featureId] = releaseId;
   }
+
+  // Build featureId -> componentName (team) map from parent chain
+  onProgress("Resolving component assignments...");
+  const teamMap = buildTeamMap(features, componentMap);
 
   const enriched = features.map((f) => ({
     ...f,
