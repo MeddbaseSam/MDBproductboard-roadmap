@@ -2,13 +2,10 @@
  * api/productboard.js — Vercel Serverless Proxy
  *
  * Forwards requests to the ProductBoard API using the token stored
- * securely in Vercel's environment variables. The browser never sees
- * the token.
+ * securely in Vercel's environment variables.
  *
  * Usage from the frontend:
- *   GET /api/productboard?path=/features&limit=100
- *
- * The `path` query param is forwarded to api.productboard.com.
+ *   GET /api/productboard?path=/features
  */
 
 const https = require("https");
@@ -16,7 +13,6 @@ const https = require("https");
 const PB_API_HOST = "api.productboard.com";
 
 module.exports = async (req, res) => {
-  // CORS — allow the frontend to call this function
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -33,34 +29,34 @@ module.exports = async (req, res) => {
 
   const apiToken = process.env.PRODUCTBOARD_API_TOKEN;
   if (!apiToken) {
-    res.status(500).json({
-      error: "PRODUCTBOARD_API_TOKEN environment variable is not set.",
-    });
+    res.status(500).json({ error: "PRODUCTBOARD_API_TOKEN is not configured." });
     return;
   }
 
-  // The frontend sends ?path=/features%3Flimit%3D100 etc.
+  // path param comes in already decoded by Vercel — use as-is
   const pbPath = req.query.path;
   if (!pbPath) {
     res.status(400).json({ error: "Missing required query param: path" });
     return;
   }
 
-  // Forward any extra query params (pagination cursors etc.) by passing
-  // them through as part of the path string from the client
+  console.log(`Proxying: GET https://${PB_API_HOST}${pbPath}`);
+
   await new Promise((resolve) => {
     const options = {
       hostname: PB_API_HOST,
       path: pbPath,
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiToken}`,
+        "Authorization": `Bearer ${apiToken}`,
         "X-Version": "1",
-        Accept: "application/json",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
       },
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
+      console.log(`ProductBoard response: ${proxyRes.statusCode} for ${pbPath}`);
       res.status(proxyRes.statusCode);
       res.setHeader("Content-Type", "application/json");
       proxyRes.pipe(res);
@@ -68,6 +64,7 @@ module.exports = async (req, res) => {
     });
 
     proxyReq.on("error", (err) => {
+      console.error(`Proxy error: ${err.message}`);
       res.status(502).json({ error: err.message });
       resolve();
     });
