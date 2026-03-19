@@ -555,7 +555,6 @@ body {
 }
 
 .status-filter-dropdown {
-  display: none;
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
@@ -566,11 +565,6 @@ body {
   min-width: 200px;
   z-index: 150;
   box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-}
-
-.status-filter-wrap:hover .status-filter-dropdown,
-.status-filter-wrap:focus-within .status-filter-dropdown {
-  display: block;
 }
 
 .status-filter-item {

@@ -244,13 +244,37 @@ function RoadmapBoard({ releases, features, onReload }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showUnmapped, setShowUnmapped] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [hiddenStatuses, setHiddenStatuses] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pb_hidden_statuses") || "[]"); }
+    catch (_) { return []; }
+  });
+  const [showStatusFilter, setShowStatusFilter] = useState(false);
   const boardRef = useRef(null);
+
+  // Collect all unique statuses from features for the filter UI
+  const allStatuses = useMemo(() => {
+    const seen = new Set();
+    for (const f of features) {
+      if (f.status?.name) seen.add(f.status.name);
+    }
+    return [...seen].sort();
+  }, [features]);
+
+  const toggleStatus = (statusName) => {
+    setHiddenStatuses((prev) => {
+      const next = prev.includes(statusName)
+        ? prev.filter((s) => s !== statusName)
+        : [...prev, statusName];
+      try { localStorage.setItem("pb_hidden_statuses", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
 
   // Build a map of releaseId -> horizon, filtering out archived releases
   const releaseHorizonMap = useMemo(() => {
-    const map = {}; // releaseId -> { horizon, name }
+    const map = {};
     for (const r of releases) {
-      if (r.archived) continue; // hide archived releases entirely
+      if (r.archived) continue;
       const horizon = classifyRelease(r.name, mapping);
       if (horizon) map[r.id] = { horizon, name: r.name };
     }
@@ -267,6 +291,8 @@ function RoadmapBoard({ releases, features, onReload }) {
 
     for (const f of features) {
       if (f.archived) continue;
+      // Apply status filter
+      if (hiddenStatuses.includes(f.status?.name)) continue;
       const releaseInfo = f._releaseId ? releaseHorizonMap[f._releaseId] : null;
       if (releaseInfo) {
         grouped[releaseInfo.horizon].features.push(f);
@@ -276,7 +302,6 @@ function RoadmapBoard({ releases, features, onReload }) {
       }
     }
 
-    // Sort features within each column by status then name
     for (const h of HORIZONS) {
       grouped[h].features.sort((a, b) => {
         const sa = (a.status?.name ?? "").toLowerCase();
@@ -288,7 +313,7 @@ function RoadmapBoard({ releases, features, onReload }) {
     }
 
     return { grouped, unmapped };
-  }, [features, releaseHorizonMap]);
+  }, [features, releaseHorizonMap, hiddenStatuses]);
 
   const totalFeatures = HORIZONS.reduce((n, h) => n + grouped[h].features.length, 0);
 
@@ -334,6 +359,37 @@ function RoadmapBoard({ releases, features, onReload }) {
             )}
           </button>
           <button className="btn btn-sm" onClick={onReload}>Refresh</button>
+          <div className="status-filter-wrap">
+            <button className="btn btn-sm" onClick={() => setShowStatusFilter((v) => !v)}>
+              Status {hiddenStatuses.length > 0 ? `(${hiddenStatuses.length} hidden)` : "filter"}
+            </button>
+            {showStatusFilter && (
+              <div className="status-filter-dropdown">
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 8 }}>
+                  Show statuses
+                </div>
+                {allStatuses.map((s) => (
+                  <label key={s} className="status-filter-item">
+                    <input
+                      type="checkbox"
+                      checked={!hiddenStatuses.includes(s)}
+                      onChange={() => toggleStatus(s)}
+                    />
+                    <span className={`card-status ${statusClass(s)}`}>{s}</span>
+                  </label>
+                ))}
+                {hiddenStatuses.length > 0 && (
+                  <button
+                    className="btn btn-sm"
+                    style={{ width: "100%", marginTop: 8 }}
+                    onClick={() => { setHiddenStatuses([]); localStorage.removeItem("pb_hidden_statuses"); }}
+                  >
+                    Show all
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <button className="btn btn-sm" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
