@@ -1,15 +1,4 @@
-/**
- * api/productboard.js — Vercel Serverless Proxy
- *
- * Forwards requests to the ProductBoard API using the token stored
- * securely in Vercel's environment variables.
- *
- * Usage from the frontend:
- *   GET /api/productboard?path=/features
- */
-
 const https = require("https");
-
 const PB_API_HOST = "api.productboard.com";
 
 module.exports = async (req, res) => {
@@ -17,28 +6,14 @@ module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") {
-    res.status(204).end();
-    return;
-  }
-
-  if (req.method !== "GET") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
+  if (req.method === "OPTIONS") { res.status(204).end(); return; }
+  if (req.method !== "GET") { res.status(405).json({ error: "Method not allowed" }); return; }
 
   const apiToken = process.env.PRODUCTBOARD_API_TOKEN;
-  if (!apiToken) {
-    res.status(500).json({ error: "PRODUCTBOARD_API_TOKEN is not configured." });
-    return;
-  }
+  if (!apiToken) { res.status(500).json({ error: "PRODUCTBOARD_API_TOKEN is not configured." }); return; }
 
-  // path param comes in already decoded by Vercel — use as-is
   const pbPath = req.query.path;
-  if (!pbPath) {
-    res.status(400).json({ error: "Missing required query param: path" });
-    return;
-  }
+  if (!pbPath) { res.status(400).json({ error: "Missing required query param: path" }); return; }
 
   console.log(`Proxying: GET https://${PB_API_HOST}${pbPath}`);
 
@@ -49,7 +24,6 @@ module.exports = async (req, res) => {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${apiToken}`,
-        "X-Version": "1",
         "Accept": "application/json",
         "Content-Type": "application/json",
       },

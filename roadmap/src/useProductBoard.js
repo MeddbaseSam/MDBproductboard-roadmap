@@ -2,13 +2,10 @@
  * useProductBoard.js
  *
  * Fetches features via the Vercel serverless proxy at /api/productboard.
- * The ProductBoard API token lives in Vercel's environment — the browser
- * never sees it. No token input required from users.
+ * Uses ProductBoard API v2 — features are "entities" at /v2/entities.
  */
 
 import { useState, useCallback } from "react";
-
-// ─── Generic fetch via proxy ──────────────────────────────────────────────────
 
 async function pbFetch(pbPath) {
   const url = `/api/productboard?path=${encodeURIComponent(pbPath)}`;
@@ -27,55 +24,22 @@ async function pbFetch(pbPath) {
   return res.json();
 }
 
-// ─── Custom field helpers ─────────────────────────────────────────────────────
-
-async function findCVPFieldId() {
-  try {
-    const res = await pbFetch("/custom-fields?limit=200");
-    const fields = res.data ?? [];
-    const match = fields.find(
-      (f) => f.name?.toLowerCase().trim() === "customer value proposition"
-    );
-    return match?.id ?? null;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function fetchCVPForFeature(featureId, cvpFieldId) {
-  if (!cvpFieldId) return null;
-  try {
-    const res = await pbFetch(`/features/${featureId}/custom-fields/${cvpFieldId}`);
-    const val = res.data?.value;
-    if (typeof val === "string") return val.trim() || null;
-    if (Array.isArray(res.data?.options)) {
-      return res.data.options.map((o) => o.label).join(", ") || null;
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
-
-// ─── Feature fetching ─────────────────────────────────────────────────────────
-
 async function fetchAllFeatures(onProgress) {
   const features = [];
   let cursor = null;
   let page = 1;
 
   do {
-    onProgress(`Fetching features (page ${page})…`);
-    let path = "/features";
-    if (cursor) path += `&pageCursor=${encodeURIComponent(cursor)}`;
+    onProgress(`Fetching features (page ${page})...`);
+    let path = "/v2/entities?type[]=feature";
+    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
 
     const response = await pbFetch(path);
-    if (Array.isArray(response.data)) features.push(...response.data);
+    const items = response.data ?? response.items ?? [];
+    if (Array.isArray(items)) features.push(...items);
 
-    const nextUrl = response.links?.next;
-    cursor = nextUrl
-      ? new URL(nextUrl).searchParams.get("pageCursor")
-      : null;
+    const meta = response.metadata ?? response.meta ?? {};
+    cursor = meta.cursor?.next ?? meta.nextCursor ?? null;
 
     page++;
   } while (cursor);
@@ -83,31 +47,46 @@ async function fetchAllFeatures(onProgress) {
   return features;
 }
 
-// ─── CVP enrichment ───────────────────────────────────────────────────────────
-
-async function enrichWithCVP(features, cvpFieldId, onProgress) {
-  if (!cvpFieldId) return features;
-
-  const CONCURRENCY = 5;
-  const enriched = [...features];
-
-  for (let i = 0; i < enriched.length; i += CONCURRENCY) {
-    const batch = enriched.slice(i, i + CONCURRENCY);
-    onProgress(
-      `Loading custom fields (${Math.min(i + CONCURRENCY, enriched.length)} / ${enriched.length})…`
-    );
-    const values = await Promise.all(
-      batch.map((f) => fetchCVPForFeature(f.id, cvpFieldId))
-    );
-    values.forEach((val, idx) => {
-      enriched[i + idx] = { ...enriched[i + idx], _cvp: val };
-    });
+async function findCVPFieldId() {
+  try {
+    const res = await pbFetch("/v2/entities/configurations");
+    const configs = res.data ?? res.items ?? [];
+    for (const config of configs) {
+      const fields = config.fields ?? config.customFields ?? [];
+      const match = fields.find(
+        (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+      );
+      if (match) return match.id;
+    }
+    return null;
+  } catch (_) {
+    return null;
   }
-
-  return enriched;
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+function extractCVP(entity) {
+  const fields = entity.fields ?? entity.customFields ?? {};
+  if (Array.isArray(fields)) {
+    const match = fields.find(
+      (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+    );
+    return match?.value?.trim() || null;
+  }
+  return null;
+}
+
+function normaliseEntity(entity) {
+  return {
+    ...entity,
+    name: entity.name ?? entity.title ?? "(Unnamed)",
+    status: entity.status ?? { name: entity.statusName ?? null },
+    timeframe: entity.timeframe ?? entity.horizon ?? null,
+    team: entity.team ?? (entity.teams?.[0] ? { name: entity.teams[0].name } : null),
+    teams: entity.teams ?? (entity.team ? [entity.team] : []),
+    links: entity.links ?? { html: entity.url ?? null },
+    _cvp: extractCVP(entity),
+  };
+}
 
 export function useProductBoard() {
   const [state, setState] = useState({
@@ -118,20 +97,14 @@ export function useProductBoard() {
   });
 
   const load = useCallback(async () => {
-    setState({ status: "loading", features: [], error: null, progress: "Connecting…" });
+    setState({ status: "loading", features: [], error: null, progress: "Connecting..." });
 
     try {
-      setState((s) => ({ ...s, progress: "Looking up custom fields…" }));
-      const cvpFieldId = await findCVPFieldId();
-
       const rawFeatures = await fetchAllFeatures((msg) => {
         setState((s) => ({ ...s, progress: msg }));
       });
 
-      const features = await enrichWithCVP(rawFeatures, cvpFieldId, (msg) => {
-        setState((s) => ({ ...s, progress: msg }));
-      });
-
+      const features = rawFeatures.map(normaliseEntity);
       setState({ status: "success", features, error: null, progress: "" });
     } catch (err) {
       setState({ status: "error", features: [], error: err.message, progress: "" });
