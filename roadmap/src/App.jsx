@@ -104,7 +104,8 @@ function FeatureCard({ feature, horizon }) {
 // ─── Column ───────────────────────────────────────────────────────────────────
 
 function Column({ horizon, features, releaseNames }) {
-  // Group features by team
+  // Group features by team, sort teams alpha with No team last,
+  // sort features within each team by name
   const teamGroups = useMemo(() => {
     const groups = {};
     for (const f of features) {
@@ -112,12 +113,18 @@ function Column({ horizon, features, releaseNames }) {
       if (!groups[team]) groups[team] = [];
       groups[team].push(f);
     }
-    // Sort team names alphabetically, "No team" last
-    return Object.entries(groups).sort(([a], [b]) => {
-      if (a === "No team") return 1;
-      if (b === "No team") return -1;
-      return a.localeCompare(b);
-    });
+    return Object.entries(groups)
+      .sort(([a], [b]) => {
+        if (a === "No team") return 1;
+        if (b === "No team") return -1;
+        return a.localeCompare(b);
+      })
+      .map(([teamName, teamFeatures]) => [
+        teamName,
+        [...teamFeatures].sort((a, b) =>
+          (a.name ?? "").localeCompare(b.name ?? "")
+        ),
+      ]);
   }, [features]);
 
   return (
@@ -125,9 +132,7 @@ function Column({ horizon, features, releaseNames }) {
       <div className="column-header">
         <div className="column-label">
           <div className={`column-label-dot ${horizon}`} />
-          <div>
-  <span className="column-name">{HORIZON_LABELS[horizon]}</span>
-</div>
+          <span className="column-name">{HORIZON_LABELS[horizon]}</span>
         </div>
         <span className="column-count">{features.length}</span>
       </div>
