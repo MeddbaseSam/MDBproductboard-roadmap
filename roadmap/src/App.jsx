@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import "./App.css";
 import { useProductBoard } from "./useProductBoard";
 
@@ -136,63 +136,50 @@ function Column({ horizon, features }) {
   );
 }
 
-// ─── Setup Screen ─────────────────────────────────────────────────────────────
+// ─── Storage helpers (mapping only — no token needed) ─────────────────────────
 
-function SetupScreen({ onConnect }) {
-  const [token, setToken] = useState(
-    () => sessionStorage.getItem("pb_token") || ""
-  );
-  const [nowTerms, setNowTerms] = useState(DEFAULT_MAPPING.now.join(", "));
-  const [nextTerms, setNextTerms] = useState(DEFAULT_MAPPING.next.join(", "));
-  const [laterTerms, setLaterTerms] = useState(DEFAULT_MAPPING.later.join(", "));
-  const [error, setError] = useState("");
+const STORAGE_MAPPING_KEY = "pb_mapping";
 
-  const handleConnect = () => {
-    if (!token.trim()) {
-      setError("Please enter your ProductBoard API token.");
-      return;
-    }
-    setError("");
-    // Store token in sessionStorage so refreshes don't lose it
-    sessionStorage.setItem("pb_token", token.trim());
+function loadSavedMapping() {
+  try {
+    const raw = localStorage.getItem(STORAGE_MAPPING_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
 
-    const mapping = {
+function saveMapping(mapping) {
+  try {
+    localStorage.setItem(STORAGE_MAPPING_KEY, JSON.stringify(mapping));
+  } catch (_) {}
+}
+
+// ─── Settings Panel ───────────────────────────────────────────────────────────
+
+function SettingsPanel({ mapping, onSave, onClose }) {
+  const [nowTerms, setNowTerms] = useState(mapping.now.join(", "));
+  const [nextTerms, setNextTerms] = useState(mapping.next.join(", "));
+  const [laterTerms, setLaterTerms] = useState(mapping.later.join(", "));
+
+  const handleSave = () => {
+    const newMapping = {
       now: nowTerms.split(",").map((s) => s.trim()).filter(Boolean),
       next: nextTerms.split(",").map((s) => s.trim()).filter(Boolean),
       later: laterTerms.split(",").map((s) => s.trim()).filter(Boolean),
     };
-    onConnect(token.trim(), mapping);
+    saveMapping(newMapping);
+    onSave(newMapping);
+    onClose();
   };
 
   return (
-    <div className="setup-screen">
-      <div className="setup-card">
-        <h2>Connect to ProductBoard</h2>
-        <p className="setup-desc">
-          Enter your ProductBoard API token. The app fetches features directly from
-          the ProductBoard API — no server or proxy needed.
-        </p>
-
-        {error && <div className="setup-error">{error}</div>}
-
-        <div className="field-group">
-          <label className="field-label">API Token</label>
-          <input
-            type="password"
-            className="field-input"
-            placeholder="pb_••••••••••••••••••••"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-            autoComplete="off"
-          />
-          <p className="field-hint">
-            Generate at ProductBoard → Settings → Integrations → API Access.
-            Your token is stored only in this browser session.
-          </p>
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+          <h3 style={{ margin: 0 }}>Settings</h3>
+          <button className="btn btn-sm" onClick={onClose}>Close</button>
         </div>
-
-        <hr className="setup-divider" />
 
         <p className="horizon-map-title">Timeframe / Release keyword mapping</p>
         <p className="horizon-map-desc">
@@ -216,11 +203,13 @@ function SetupScreen({ onConnect }) {
           </div>
         ))}
 
-        <div style={{ marginTop: "1.75rem" }}>
-          <button className="btn btn-primary" onClick={handleConnect} style={{ width: "100%" }}>
-            Load roadmap
-          </button>
-        </div>
+        <button
+          className="btn btn-primary"
+          onClick={handleSave}
+          style={{ width: "100%", marginTop: "1.5rem" }}
+        >
+          Save &amp; reload
+        </button>
       </div>
     </div>
   );
@@ -255,8 +244,9 @@ async function exportBoardAsImage(boardRef) {
 
 // ─── Roadmap Board ────────────────────────────────────────────────────────────
 
-function RoadmapBoard({ features, mapping, onReset }) {
+function RoadmapBoard({ features, mapping, onMappingChange, onReload }) {
   const [showUnmapped, setShowUnmapped] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [exporting, setExporting] = useState(false);
   const boardRef = useRef(null);
 
@@ -285,6 +275,14 @@ function RoadmapBoard({ features, mapping, onReset }) {
 
   return (
     <>
+      {showSettings && (
+        <SettingsPanel
+          mapping={mapping}
+          onSave={(newMapping) => { onMappingChange(newMapping); onReload(); }}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
       <div className="header">
         <div className="header-brand">
           <div className="header-logo"><span>PB</span></div>
@@ -299,11 +297,7 @@ function RoadmapBoard({ features, mapping, onReset }) {
               {unmapped.length} unmapped
             </button>
           )}
-          <button
-            className="btn btn-sm"
-            onClick={handleExport}
-            disabled={exporting}
-          >
+          <button className="btn btn-sm" onClick={handleExport} disabled={exporting}>
             {exporting ? "Exporting…" : (
               <>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -313,9 +307,8 @@ function RoadmapBoard({ features, mapping, onReset }) {
               </>
             )}
           </button>
-          <button className="btn btn-sm" onClick={onReset}>
-            Settings
-          </button>
+          <button className="btn btn-sm" onClick={onReload}>Refresh</button>
+          <button className="btn btn-sm" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
 
@@ -331,7 +324,6 @@ function RoadmapBoard({ features, mapping, onReset }) {
             Adjust keyword mapping in Settings to include them.
           </div>
         )}
-
         <div className="roadmap-grid">
           {HORIZONS.map((h) => (
             <Column key={h} horizon={h} features={grouped[h]} />
@@ -372,23 +364,30 @@ function ErrorScreen({ message, onRetry }) {
 
 export default function App() {
   const { status, features, error, progress, load, reset } = useProductBoard();
-  const [mapping, setMapping] = useState(DEFAULT_MAPPING);
+  const [mapping, setMapping] = useState(() => loadSavedMapping() || DEFAULT_MAPPING);
 
-  const handleConnect = useCallback(
-    (token, newMapping) => {
-      setMapping(newMapping);
-      load(token);
-    },
-    [load]
-  );
+  // Auto-load on first render
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleReload = useCallback(() => {
+    reset();
+    setTimeout(() => load(), 0);
+  }, [load, reset]);
 
   return (
     <div className="app">
-      {status === "idle" && <SetupScreen onConnect={handleConnect} />}
+      {status === "idle" && <LoadingScreen message="Starting…" />}
       {status === "loading" && <LoadingScreen message={progress} />}
-      {status === "error" && <ErrorScreen message={error} onRetry={reset} />}
+      {status === "error" && <ErrorScreen message={error} onRetry={handleReload} />}
       {status === "success" && (
-        <RoadmapBoard features={features} mapping={mapping} onReset={reset} />
+        <RoadmapBoard
+          features={features}
+          mapping={mapping}
+          onMappingChange={setMapping}
+          onReload={handleReload}
+        />
       )}
     </div>
   );

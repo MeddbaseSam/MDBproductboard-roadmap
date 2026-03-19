@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/productboard",
+      "destination": "/api/productboard"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

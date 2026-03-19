@@ -1,36 +1,24 @@
 /**
  * useProductBoard.js
  *
- * Fetches features, teams, and custom field values directly from the
- * ProductBoard public API (no proxy required — PB supports CORS for
- * browser requests authenticated with a Bearer token).
- *
- * Strategy:
- *  1. Fetch all custom field definitions to find "Customer Value Proposition"
- *  2. Fetch all features (paginated)
- *  3. For each feature, fetch its custom field values (batched, 5 at a time)
- *  4. Merge everything and return enriched feature objects
+ * Fetches features via the Vercel serverless proxy at /api/productboard.
+ * The ProductBoard API token lives in Vercel's environment — the browser
+ * never sees it. No token input required from users.
  */
 
 import { useState, useCallback } from "react";
 
-const PB_API = "https://api.productboard.com";
+// ─── Generic fetch via proxy ──────────────────────────────────────────────────
 
-// ─── Generic fetch helper ────────────────────────────────────────────────────
-
-async function pbFetch(apiToken, path) {
-  const res = await fetch(`${PB_API}${path}`, {
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "X-Version": "1",
-    },
-  });
+async function pbFetch(pbPath) {
+  const url = `/api/productboard?path=${encodeURIComponent(pbPath)}`;
+  const res = await fetch(url);
 
   if (!res.ok) {
-    let errMsg = `ProductBoard API error ${res.status} on ${path}`;
+    let errMsg = `ProductBoard API error ${res.status}`;
     try {
       const body = await res.json();
-      const detail = body.errors?.[0]?.detail || body.message;
+      const detail = body.errors?.[0]?.detail || body.error || body.message;
       if (detail) errMsg += `: ${detail}`;
     } catch (_) {}
     throw new Error(errMsg);
@@ -39,41 +27,27 @@ async function pbFetch(apiToken, path) {
   return res.json();
 }
 
-// ─── Custom field helpers ────────────────────────────────────────────────────
+// ─── Custom field helpers ─────────────────────────────────────────────────────
 
-/**
- * Find the ID of the custom field named "Customer Value Proposition".
- * Returns null if not found (graceful — the card just won't show it).
- */
-async function findCVPFieldId(apiToken) {
+async function findCVPFieldId() {
   try {
-    const res = await pbFetch(apiToken, "/custom-fields?limit=200");
+    const res = await pbFetch("/custom-fields?limit=200");
     const fields = res.data ?? [];
     const match = fields.find(
       (f) => f.name?.toLowerCase().trim() === "customer value proposition"
     );
     return match?.id ?? null;
   } catch (_) {
-    // Non-fatal — carry on without the custom field
     return null;
   }
 }
 
-/**
- * Fetch the Customer Value Proposition value for a single feature.
- * Returns a string or null.
- */
-async function fetchCVPForFeature(apiToken, featureId, cvpFieldId) {
+async function fetchCVPForFeature(featureId, cvpFieldId) {
   if (!cvpFieldId) return null;
   try {
-    const res = await pbFetch(
-      apiToken,
-      `/features/${featureId}/custom-fields/${cvpFieldId}`
-    );
-    // The value lives at data.value (text fields) or data.options (dropdown)
+    const res = await pbFetch(`/features/${featureId}/custom-fields/${cvpFieldId}`);
     const val = res.data?.value;
     if (typeof val === "string") return val.trim() || null;
-    // Dropdown / multi-select
     if (Array.isArray(res.data?.options)) {
       return res.data.options.map((o) => o.label).join(", ") || null;
     }
@@ -83,9 +57,9 @@ async function fetchCVPForFeature(apiToken, featureId, cvpFieldId) {
   }
 }
 
-// ─── Feature fetching ────────────────────────────────────────────────────────
+// ─── Feature fetching ─────────────────────────────────────────────────────────
 
-async function fetchAllFeatures(apiToken, onProgress) {
+async function fetchAllFeatures(onProgress) {
   const features = [];
   let cursor = null;
   let page = 1;
@@ -95,10 +69,9 @@ async function fetchAllFeatures(apiToken, onProgress) {
     let path = "/features?sort=name&limit=100";
     if (cursor) path += `&pageCursor=${encodeURIComponent(cursor)}`;
 
-    const response = await pbFetch(apiToken, path);
+    const response = await pbFetch(path);
     if (Array.isArray(response.data)) features.push(...response.data);
 
-    // PB returns a full URL in links.next; extract just the cursor param
     const nextUrl = response.links?.next;
     cursor = nextUrl
       ? new URL(nextUrl).searchParams.get("pageCursor")
@@ -110,13 +83,9 @@ async function fetchAllFeatures(apiToken, onProgress) {
   return features;
 }
 
-// ─── Batch enrichment ────────────────────────────────────────────────────────
+// ─── CVP enrichment ───────────────────────────────────────────────────────────
 
-/**
- * Enrich features with CVP custom field values.
- * Runs CONCURRENCY fetches at a time to avoid hammering the API.
- */
-async function enrichWithCVP(apiToken, features, cvpFieldId, onProgress) {
+async function enrichWithCVP(features, cvpFieldId, onProgress) {
   if (!cvpFieldId) return features;
 
   const CONCURRENCY = 5;
@@ -127,11 +96,9 @@ async function enrichWithCVP(apiToken, features, cvpFieldId, onProgress) {
     onProgress(
       `Loading custom fields (${Math.min(i + CONCURRENCY, enriched.length)} / ${enriched.length})…`
     );
-
     const values = await Promise.all(
-      batch.map((f) => fetchCVPForFeature(apiToken, f.id, cvpFieldId))
+      batch.map((f) => fetchCVPForFeature(f.id, cvpFieldId))
     );
-
     values.forEach((val, idx) => {
       enriched[i + idx] = { ...enriched[i + idx], _cvp: val };
     });
@@ -140,31 +107,28 @@ async function enrichWithCVP(apiToken, features, cvpFieldId, onProgress) {
   return enriched;
 }
 
-// ─── Hook ────────────────────────────────────────────────────────────────────
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useProductBoard() {
   const [state, setState] = useState({
-    status: "idle", // idle | loading | success | error
+    status: "idle",
     features: [],
     error: null,
     progress: "",
   });
 
-  const load = useCallback(async (apiToken) => {
+  const load = useCallback(async () => {
     setState({ status: "loading", features: [], error: null, progress: "Connecting…" });
 
     try {
-      // Step 1: find the CVP field ID
       setState((s) => ({ ...s, progress: "Looking up custom fields…" }));
-      const cvpFieldId = await findCVPFieldId(apiToken);
+      const cvpFieldId = await findCVPFieldId();
 
-      // Step 2: fetch all features
-      const rawFeatures = await fetchAllFeatures(apiToken, (msg) => {
+      const rawFeatures = await fetchAllFeatures((msg) => {
         setState((s) => ({ ...s, progress: msg }));
       });
 
-      // Step 3: enrich with CVP values
-      const features = await enrichWithCVP(apiToken, rawFeatures, cvpFieldId, (msg) => {
+      const features = await enrichWithCVP(rawFeatures, cvpFieldId, (msg) => {
         setState((s) => ({ ...s, progress: msg }));
       });
 
