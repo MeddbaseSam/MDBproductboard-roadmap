@@ -548,3 +548,44 @@ body {
   color: var(--text-muted);
   padding: 0 2px;
 }
+
+/* ── Status filter dropdown ──────────────────────────────── */
+.status-filter-wrap {
+  position: relative;
+}
+
+.status-filter-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  min-width: 200px;
+  z-index: 150;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+
+.status-filter-wrap:hover .status-filter-dropdown,
+.status-filter-wrap:focus-within .status-filter-dropdown {
+  display: block;
+}
+
+.status-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.status-filter-item input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}

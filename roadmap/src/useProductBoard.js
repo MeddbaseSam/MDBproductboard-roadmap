@@ -1,16 +1,8 @@
 /**
  * useProductBoard.js
  *
- * Fetches data from ProductBoard using v1 API for features/releases
- * and v2 API for teams (not available in v1).
- *
- * Endpoints used:
- *  v1: GET /features
- *  v1: GET /releases
- *  v1: GET /feature-release-assignments
- *  v1: GET /hierarchy-entities/custom-fields?type[]=text  (find CVP field ID)
- *  v1: GET /hierarchy-entities/custom-fields-values?customField.id={id}
- *  v2: GET /v2/entities?type[]=feature  (for team data only)
+ * v1 API for features, releases, release assignments, custom fields.
+ * v2 API for team data (not available in v1).
  */
 
 import { useState, useCallback } from "react";
@@ -32,7 +24,7 @@ async function pbFetch(path) {
   return res.json();
 }
 
-// ─── Paginated fetch — follows links.next automatically ──────────────────────
+// ─── Paginated fetch ──────────────────────────────────────────────────────────
 
 async function fetchAllPages(firstPath, onProgress, label) {
   const items = [];
@@ -64,15 +56,23 @@ async function fetchAllPages(firstPath, onProgress, label) {
 
 async function findCVPFieldId() {
   try {
-    // v1 custom fields live under /hierarchy-entities/custom-fields
-    // Must specify type filter
-    const res = await pbFetch("/hierarchy-entities/custom-fields?type[]=text&type[]=number&type[]=dropdown");
-    const fields = res.data ?? [];
-    const match = fields.find(
-      (f) => f.name?.toLowerCase().trim() === "customer value proposition"
-    );
-    return match?.id ?? null;
-  } catch (_) {
+    // Fetch each type separately to avoid bracket encoding issues
+    const types = ["text", "number", "dropdown", "textarea"];
+    for (const type of types) {
+      const res = await pbFetch(`/hierarchy-entities/custom-fields?type=${type}`);
+      const fields = res.data ?? [];
+      const match = fields.find(
+        (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+      );
+      if (match) {
+        console.log(`Found CVP field: ${match.id} (type: ${type})`);
+        return match.id;
+      }
+    }
+    console.warn("CVP custom field not found");
+    return null;
+  } catch (e) {
+    console.warn("Could not fetch custom fields:", e.message);
     return null;
   }
 }
@@ -83,21 +83,22 @@ async function fetchCVPValues(cvpFieldId) {
     const items = await fetchAllPages(
       `/hierarchy-entities/custom-fields-values?customField.id=${cvpFieldId}`,
       null,
-      "custom field values"
+      "CVP values"
     );
-    // Build map of featureId -> value
     const map = {};
     for (const item of items) {
       const featureId = item.hierarchyEntity?.id;
       if (!featureId) continue;
-      // value shape depends on field type
+      // Text fields return item.value, dropdowns return item.option.label
       const val = item.value ?? item.option?.label ?? null;
-      if (val !== null && val !== undefined) {
-        map[featureId] = String(val).trim() || null;
+      if (val !== null && val !== undefined && String(val).trim()) {
+        map[featureId] = String(val).trim();
       }
     }
+    console.log(`Loaded ${Object.keys(map).length} CVP values`);
     return map;
-  } catch (_) {
+  } catch (e) {
+    console.warn("Could not fetch CVP values:", e.message);
     return {};
   }
 }
@@ -105,10 +106,9 @@ async function fetchCVPValues(cvpFieldId) {
 // ─── Teams from v2 ───────────────────────────────────────────────────────────
 
 async function fetchTeamMap() {
-  // Returns { [featureId]: teamName }
   try {
     const map = {};
-    let nextPath = "/v2/entities?type[]=feature";
+    let nextPath = "/v2/entities?type%5B%5D=feature";
     while (nextPath) {
       const response = await pbFetch(nextPath);
       const items = response.data ?? [];
@@ -120,10 +120,14 @@ async function fetchTeamMap() {
       }
       const meta = response.metadata ?? response.meta ?? {};
       const cursor = meta.cursor?.next ?? null;
-      nextPath = cursor ? `/v2/entities?type[]=feature&cursor=${encodeURIComponent(cursor)}` : null;
+      nextPath = cursor
+        ? `/v2/entities?type%5B%5D=feature&cursor=${encodeURIComponent(cursor)}`
+        : null;
     }
+    console.log(`Loaded teams for ${Object.keys(map).length} features`);
     return map;
-  } catch (_) {
+  } catch (e) {
+    console.warn("Could not fetch team data:", e.message);
     return {};
   }
 }
@@ -131,22 +135,19 @@ async function fetchTeamMap() {
 // ─── Main load ────────────────────────────────────────────────────────────────
 
 async function loadAll(onProgress) {
-  onProgress("Loading releases and custom fields...");
+  onProgress("Loading releases and field definitions...");
 
-  // Kick off releases, CVP field ID, and team map in parallel
   const [releases, cvpFieldId, teamMap] = await Promise.all([
     fetchAllPages("/releases", null, "releases"),
     findCVPFieldId(),
     fetchTeamMap(),
   ]);
 
-  // Fetch features and release assignments in parallel
   const [features, assignments] = await Promise.all([
     fetchAllPages("/features", onProgress, "features"),
     fetchAllPages("/feature-release-assignments", null, "release assignments"),
   ]);
 
-  // Fetch CVP values now that we have the field ID
   onProgress("Loading custom field values...");
   const cvpMap = await fetchCVPValues(cvpFieldId);
 
@@ -158,7 +159,6 @@ async function loadAll(onProgress) {
     if (featureId && releaseId) featureReleaseMap[featureId] = releaseId;
   }
 
-  // Enrich features with release, CVP, and team
   const enriched = features.map((f) => ({
     ...f,
     _releaseId: featureReleaseMap[f.id] ?? null,
@@ -166,7 +166,6 @@ async function loadAll(onProgress) {
     _team: teamMap[f.id] ?? null,
   }));
 
-  // Sort releases by startDate (none = last)
   const sortedReleases = [...releases].sort((a, b) => {
     const da = a.startDate && a.startDate !== "none" ? new Date(a.startDate) : Infinity;
     const db = b.startDate && b.startDate !== "none" ? new Date(b.startDate) : Infinity;

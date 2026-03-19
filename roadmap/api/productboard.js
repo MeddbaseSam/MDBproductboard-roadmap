@@ -1,10 +1,11 @@
 /**
  * api/productboard.js — Vercel Serverless Proxy
  *
- * Forwards requests to the ProductBoard API v1 using the token stored
- * in Vercel environment variables. The browser never sees the token.
+ * Forwards requests to the ProductBoard API v1/v2 using the token
+ * stored in Vercel environment variables.
  *
  * Usage: GET /api/productboard?path=/features
+ * The path param should be the full PB API path including query string.
  */
 
 const https = require("https");
@@ -21,6 +22,7 @@ module.exports = async (req, res) => {
   const apiToken = process.env.PRODUCTBOARD_API_TOKEN;
   if (!apiToken) { res.status(500).json({ error: "PRODUCTBOARD_API_TOKEN is not configured." }); return; }
 
+  // Vercel automatically decodes query params — re-encode for forwarding
   const pbPath = req.query.path;
   if (!pbPath) { res.status(400).json({ error: "Missing required query param: path" }); return; }
 
