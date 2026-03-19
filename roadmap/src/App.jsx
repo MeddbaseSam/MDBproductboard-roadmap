@@ -253,7 +253,7 @@ function buildSlideHTML(horizon, features, releaseNames) {
   const label = { now: "Now", next: "Next", later: "Later" }[horizon];
   const date = new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
-  // Group by team
+  // Group by team, sort alphabetically, No team last
   const teamGroups = {};
   for (const f of features) {
     const team = f._team ?? "No team";
@@ -266,67 +266,55 @@ function buildSlideHTML(horizon, features, releaseNames) {
     return a.localeCompare(b);
   });
 
-  const CARD_W = 340;
-  const CARD_PAD = 16;
-  const SLIDE_W = 1920;
-  const SLIDE_H = 1080;
-  const HEADER_H = 100;
-  const COL_GAP = 24;
-  const TEAM_HEADER_H = 28;
-  const CARD_MIN_H = 90;
-  const CVP_LINE_H = 16;
-  const MAX_CVP_LINES = 3;
+  // Build one column per team, laid out as a flex row
+  const CARD_PAD = 14;
+  const numTeams = sortedTeams.length;
+  // Spread teams evenly across the slide width
+  const colWidth = Math.floor((1920 - 96 - (numTeams - 1) * 20) / Math.max(numTeams, 1));
 
-  // Calculate how many columns fit
-  const availW = SLIDE_W - 96;
-  const cols = Math.max(1, Math.floor((availW + COL_GAP) / (CARD_W + COL_GAP)));
-
-  // Build cards HTML
-  const cardsHTML = sortedTeams.map(([teamName, teamFeatures]) => {
+  const teamCols = sortedTeams.map(([teamName, teamFeatures]) => {
     const featureCards = teamFeatures.map((f) => {
       const status = f.status?.name ?? "";
       const sc = getStatusStyle(status);
-      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.45;color:#4A6278;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${f._cvp}</div>` : "";
-      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${sc.bg};color:${sc.color};text-transform:capitalize;">${status}</span>` : "";
-      const teamBadge = f._team ? `<span style="font-size:10px;color:#4A6278;background:#EDF2F7;border:0.5px solid #DDE4EC;border-radius:4px;padding:2px 7px;">${f._team}</span>` : "";
-      const footer = (statusBadge || teamBadge) ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">${statusBadge}${teamBadge}</div>` : "";
-      return `<div style="background:#ffffff;border:1px solid #DDE4EC;border-left:3px solid ${c.accent};border-radius:6px;padding:${CARD_PAD}px;margin-bottom:8px;">
-        <div style="font-size:12.5px;font-weight:600;line-height:1.35;color:#0D2B45;margin-bottom:6px;">${f.name}</div>
-        ${cvp}${footer}
+      const cvp = f._cvp ? `<div style="font-size:11px;line-height:1.5;color:#4A6278;margin-bottom:8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${f._cvp.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>` : "";
+      const statusBadge = status ? `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;background:${sc.bg};color:${sc.color};text-transform:capitalize;display:inline-block;">${status}</span>` : "";
+      return `<div style="background:#ffffff;border:1px solid #DDE4EC;border-left:3px solid ${c.accent};border-radius:6px;padding:${CARD_PAD}px;margin-bottom:8px;width:100%;">
+        <div style="font-size:12px;font-weight:600;line-height:1.4;color:#0D2B45;margin-bottom:5px;">${f.name.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+        ${cvp}
+        ${statusBadge}
       </div>`;
     }).join("");
 
-    return `<div style="break-inside:avoid;margin-bottom:16px;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;color:#8A9BAA;margin-bottom:6px;padding-left:2px;padding-bottom:4px;border-bottom:1px solid #DDE4EC;">${teamName}</div>
-      ${featureCards}
+    return `<div style="width:${colWidth}px;flex-shrink:0;display:flex;flex-direction:column;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;color:#8A9BAA;padding-bottom:6px;margin-bottom:8px;border-bottom:2px solid ${c.accent};">${teamName}</div>
+      <div style="overflow:hidden;flex:1;">
+        ${featureCards}
+      </div>
     </div>`;
   }).join("");
-
-  const releaseSubtitle = releaseNames.length > 0
-    ? `<div style="font-size:13px;color:${c.text};opacity:0.7;margin-top:4px;">${releaseNames.join(" · ")}</div>`
-    : "";
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: ${SLIDE_W}px; height: ${SLIDE_H}px; overflow: hidden; background: #F4F7FA; font-family: 'Inter', system-ui, sans-serif; }
+    body { width: 1920px; height: 1080px; overflow: hidden; background: #F4F7FA; font-family: 'Inter', system-ui, sans-serif; }
   </style>
   </head><body>
-  <div style="width:${SLIDE_W}px;height:${SLIDE_H}px;background:#F4F7FA;display:flex;flex-direction:column;">
-    <div style="background:#0D2B45;padding:28px 48px 24px;display:flex;align-items:center;gap:16px;border-bottom:4px solid #dc3b42;">
-      <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" style="height:32px;object-fit:contain;flex-shrink:0;filter:brightness(0) invert(1);" crossorigin="anonymous" />
-      <div>
-        <div style="font-size:28px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;line-height:1.1;">${label}</div>
-        ${releaseSubtitle ? `<div style="font-size:13px;color:rgba(255,255,255,0.6);margin-top:3px;">${releaseNames.join(" · ")}</div>` : ""}
+  <div style="width:1920px;height:1080px;background:#F4F7FA;display:flex;flex-direction:column;">
+    <div style="background:#0D2B45;padding:22px 48px 20px;display:flex;align-items:center;gap:20px;border-bottom:4px solid #dc3b42;flex-shrink:0;">
+      <img src="https://www.meddbase.com/wp-content/uploads/2025/06/MeddbaseByCority.webp" alt="Meddbase" style="height:28px;object-fit:contain;flex-shrink:0;filter:brightness(0) invert(1);" crossorigin="anonymous" />
+      <div style="width:1px;height:24px;background:rgba(255,255,255,0.2);flex-shrink:0;"></div>
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <span style="font-size:26px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">${label}</span>
+        ${releaseNames.length > 0 ? `<span style="font-size:13px;color:rgba(255,255,255,0.55);">${releaseNames.join(" · ")}</span>` : ""}
       </div>
       <div style="margin-left:auto;text-align:right;">
         <div style="font-size:12px;color:rgba(255,255,255,0.5);">${date}</div>
-        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:2px;">${features.length} features</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:2px;">${features.length} features across ${sortedTeams.length} team${sortedTeams.length !== 1 ? "s" : ""}</div>
       </div>
     </div>
-    <div style="flex:1;overflow:hidden;padding:24px 48px;columns:${cols};column-gap:${COL_GAP}px;">
-      ${cardsHTML}
+    <div style="flex:1;overflow:hidden;padding:20px 48px 24px;display:flex;flex-direction:row;gap:20px;align-items:flex-start;">
+      ${teamCols}
     </div>
   </div>
   </body></html>`;
