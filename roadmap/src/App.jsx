@@ -5,9 +5,7 @@ import { useProductBoard } from "./useProductBoard";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getTeamName(feature) {
-  if (Array.isArray(feature.teams) && feature.teams.length > 0) return feature.teams[0].name ?? null;
-  if (feature.team?.name) return feature.team.name;
-  return null;
+  return feature._team ?? null;
 }
 
 function getProductBoardUrl(feature) {
@@ -106,6 +104,22 @@ function FeatureCard({ feature, horizon }) {
 // ─── Column ───────────────────────────────────────────────────────────────────
 
 function Column({ horizon, features, releaseNames }) {
+  // Group features by team
+  const teamGroups = useMemo(() => {
+    const groups = {};
+    for (const f of features) {
+      const team = f._team ?? "No team";
+      if (!groups[team]) groups[team] = [];
+      groups[team].push(f);
+    }
+    // Sort team names alphabetically, "No team" last
+    return Object.entries(groups).sort(([a], [b]) => {
+      if (a === "No team") return 1;
+      if (b === "No team") return -1;
+      return a.localeCompare(b);
+    });
+  }, [features]);
+
   return (
     <div className="column">
       <div className="column-header">
@@ -127,8 +141,13 @@ function Column({ horizon, features, releaseNames }) {
         <div className="empty-column"><span>No features</span></div>
       ) : (
         <div className="column-cards">
-          {features.map((f) => (
-            <FeatureCard key={f.id} feature={f} horizon={horizon} />
+          {teamGroups.map(([teamName, teamFeatures]) => (
+            <div key={teamName} className="team-group">
+              <div className="team-group-header">{teamName}</div>
+              {teamFeatures.map((f) => (
+                <FeatureCard key={f.id} feature={f} horizon={horizon} />
+              ))}
+            </div>
           ))}
         </div>
       )}
