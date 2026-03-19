@@ -1,3 +1,12 @@
+/**
+ * api/productboard.js — Vercel Serverless Proxy
+ *
+ * Forwards requests to the ProductBoard API v1 using the token stored
+ * in Vercel environment variables. The browser never sees the token.
+ *
+ * Usage: GET /api/productboard?path=/features
+ */
+
 const https = require("https");
 const PB_API_HOST = "api.productboard.com";
 
@@ -24,8 +33,8 @@ module.exports = async (req, res) => {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${apiToken}`,
+        "X-Version": "1",
         "Accept": "application/json",
-        "Content-Type": "application/json",
       },
     };
 

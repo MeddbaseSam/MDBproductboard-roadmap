@@ -1,118 +1,179 @@
 /**
  * useProductBoard.js
  *
- * Fetches features via the Vercel serverless proxy at /api/productboard.
- * Uses ProductBoard API v2 — features are "entities" at /v2/entities.
+ * Uses ProductBoard API v1.
+ *
+ * Fetches:
+ *  1. All releases (GET /releases)
+ *  2. All feature-release assignments (GET /features/release-assignments)
+ *  3. All features (GET /features)
+ *  4. The "Customer Value Proposition" custom field ID, then values per feature
+ *
+ * Returns { releases, features } where each feature has _releaseId attached.
+ * The UI groups features by release and renders one column per release.
  */
 
 import { useState, useCallback } from "react";
 
-async function pbFetch(pbPath) {
-  const url = `/api/productboard?path=${encodeURIComponent(pbPath)}`;
-  const res = await fetch(url);
+// ─── Generic v1 fetch via proxy ───────────────────────────────────────────────
 
+async function pbFetch(path) {
+  const url = `/api/productboard?path=${encodeURIComponent(path)}`;
+  const res = await fetch(url);
   if (!res.ok) {
-    let errMsg = `ProductBoard API error ${res.status}`;
+    let msg = `ProductBoard API error ${res.status}`;
     try {
       const body = await res.json();
       const detail = body.errors?.[0]?.detail || body.error || body.message;
-      if (detail) errMsg += `: ${detail}`;
+      if (detail) msg += `: ${detail}`;
     } catch (_) {}
-    throw new Error(errMsg);
+    throw new Error(msg);
   }
-
   return res.json();
 }
 
-async function fetchAllFeatures(onProgress) {
-  const features = [];
-  let cursor = null;
+// ─── Paginated fetch — follows links.next automatically ──────────────────────
+
+async function fetchAllPages(firstPath, onProgress, label) {
+  const items = [];
+  let nextUrl = firstPath;
   let page = 1;
 
-  do {
-    onProgress(`Fetching features (page ${page})...`);
-    let path = "/v2/entities?type[]=feature";
-    if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+  while (nextUrl) {
+    if (onProgress) onProgress(`Fetching ${label} (page ${page})...`);
+    const response = await pbFetch(nextUrl);
+    const data = response.data ?? [];
+    items.push(...data);
 
-    const response = await pbFetch(path);
-    const items = response.data ?? response.items ?? [];
-    if (Array.isArray(items)) features.push(...items);
-
-    const meta = response.metadata ?? response.meta ?? {};
-    cursor = meta.cursor?.next ?? meta.nextCursor ?? null;
-
+    // links.next is a full URL — extract just the path+query for the proxy
+    const next = response.links?.next;
+    if (next) {
+      try {
+        const parsed = new URL(next);
+        nextUrl = parsed.pathname + parsed.search;
+      } catch (_) {
+        nextUrl = null;
+      }
+    } else {
+      nextUrl = null;
+    }
     page++;
-  } while (cursor);
+  }
 
-  return features;
+  return items;
 }
+
+// ─── Custom field helpers ─────────────────────────────────────────────────────
 
 async function findCVPFieldId() {
   try {
-    const res = await pbFetch("/v2/entities/configurations");
-    const configs = res.data ?? res.items ?? [];
-    for (const config of configs) {
-      const fields = config.fields ?? config.customFields ?? [];
-      const match = fields.find(
-        (f) => f.name?.toLowerCase().trim() === "customer value proposition"
-      );
-      if (match) return match.id;
-    }
-    return null;
+    const res = await pbFetch("/custom-fields");
+    const fields = res.data ?? [];
+    const match = fields.find(
+      (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+    );
+    return match?.id ?? null;
   } catch (_) {
     return null;
   }
 }
 
-function extractCVP(entity) {
-  const fields = entity.fields ?? entity.customFields ?? {};
-  if (Array.isArray(fields)) {
-    const match = fields.find(
-      (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+async function fetchCVPValues(cvpFieldId) {
+  // Returns a map of { [featureId]: value }
+  if (!cvpFieldId) return {};
+  try {
+    const items = await fetchAllPages(
+      `/custom-fields/${cvpFieldId}/values`,
+      null,
+      "custom field values"
     );
-    return match?.value?.trim() || null;
+    const map = {};
+    for (const item of items) {
+      const featureId = item.feature?.id ?? item.featureId;
+      if (featureId) {
+        map[featureId] = item.value ?? null;
+      }
+    }
+    return map;
+  } catch (_) {
+    return {};
   }
-  return null;
 }
 
-function normaliseEntity(entity) {
-  return {
-    ...entity,
-    name: entity.name ?? entity.title ?? "(Unnamed)",
-    status: entity.status ?? { name: entity.statusName ?? null },
-    timeframe: entity.timeframe ?? entity.horizon ?? null,
-    team: entity.team ?? (entity.teams?.[0] ? { name: entity.teams[0].name } : null),
-    teams: entity.teams ?? (entity.team ? [entity.team] : []),
-    links: entity.links ?? { html: entity.url ?? null },
-    _cvp: extractCVP(entity),
-  };
+// ─── Main load function ───────────────────────────────────────────────────────
+
+async function loadAll(onProgress) {
+  // Step 1: fetch releases, feature-release assignments, features, CVP field — parallel where possible
+  onProgress("Looking up releases and custom fields...");
+
+  const [releases, cvpFieldId] = await Promise.all([
+    fetchAllPages("/releases", null, "releases"),
+    findCVPFieldId(),
+  ]);
+
+  // Step 2: fetch features and release assignments in parallel
+  const [features, assignments] = await Promise.all([
+    fetchAllPages("/features", onProgress, "features"),
+    fetchAllPages("/features/release-assignments", null, "release assignments"),
+  ]);
+
+  // Step 3: fetch CVP values
+  onProgress("Loading custom field values...");
+  const cvpMap = await fetchCVPValues(cvpFieldId);
+
+  // Step 4: build a map of featureId -> releaseId from assignments
+  const featureReleaseMap = {};
+  for (const a of assignments) {
+    const featureId = a.feature?.id ?? a.featureId;
+    const releaseId = a.release?.id ?? a.releaseId;
+    if (featureId && releaseId) {
+      featureReleaseMap[featureId] = releaseId;
+    }
+  }
+
+  // Step 5: enrich features
+  const enrichedFeatures = features.map((f) => ({
+    ...f,
+    _releaseId: featureReleaseMap[f.id] ?? null,
+    _cvp: cvpMap[f.id] ?? null,
+  }));
+
+  // Step 6: sort releases by startDate, put those without dates last
+  const sortedReleases = [...releases].sort((a, b) => {
+    const da = a.startDate ? new Date(a.startDate) : Infinity;
+    const db = b.startDate ? new Date(b.startDate) : Infinity;
+    return da - db;
+  });
+
+  return { releases: sortedReleases, features: enrichedFeatures };
 }
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useProductBoard() {
   const [state, setState] = useState({
     status: "idle",
+    releases: [],
     features: [],
     error: null,
     progress: "",
   });
 
   const load = useCallback(async () => {
-    setState({ status: "loading", features: [], error: null, progress: "Connecting..." });
+    setState({ status: "loading", releases: [], features: [], error: null, progress: "Connecting..." });
 
     try {
-      const rawFeatures = await fetchAllFeatures((msg) => {
+      const { releases, features } = await loadAll((msg) => {
         setState((s) => ({ ...s, progress: msg }));
       });
-
-      const features = rawFeatures.map(normaliseEntity);
-      setState({ status: "success", features, error: null, progress: "" });
+      setState({ status: "success", releases, features, error: null, progress: "" });
     } catch (err) {
-      setState({ status: "error", features: [], error: err.message, progress: "" });
+      setState({ status: "error", releases: [], features: [], error: err.message, progress: "" });
     }
   }, []);
 
   const reset = useCallback(() => {
-    setState({ status: "idle", features: [], error: null, progress: "" });
+    setState({ status: "idle", releases: [], features: [], error: null, progress: "" });
   }, []);
 
   return { ...state, load, reset };
