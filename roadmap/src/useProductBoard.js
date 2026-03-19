@@ -163,7 +163,7 @@ async function loadAll(onProgress) {
     ...f,
     _releaseId: featureReleaseMap[f.id] ?? null,
     _cvp: cvpMap[f.id] ?? null,
-    _team: teamMap[f.id] ?? null,
+    _team: teamMap[f.name?.toLowerCase().trim()] ?? null,
   }));
 
   const sortedReleases = [...releases].sort((a, b) => {
