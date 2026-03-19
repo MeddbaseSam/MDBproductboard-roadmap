@@ -19,29 +19,46 @@ function statusClass(status) {
   return "status-" + status.toLowerCase().replace(/\s+/g, "-");
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return null;
-  try {
-    return new Date(dateStr).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
-  } catch (_) { return null; }
+function classifyRelease(releaseName, mapping) {
+  if (!releaseName) return null;
+  const lower = releaseName.toLowerCase().trim();
+  for (const [horizon, terms] of Object.entries(mapping)) {
+    for (const term of terms) {
+      if (lower.includes(term.toLowerCase().trim())) return horizon;
+    }
+  }
+  return null;
 }
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const DEFAULT_MAPPING = {
+  now: ["now", "current", "this quarter"],
+  next: ["next", "upcoming"],
+  later: ["later", "future", "backlog"],
+};
+
+const HORIZONS = ["now", "next", "later"];
+const HORIZON_LABELS = { now: "Now", next: "Next", later: "Later" };
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
-const STORAGE_FILTER_KEY = "pb_filter";
+const STORAGE_MAPPING_KEY = "pb_mapping";
 
-function loadSavedFilter() {
+function loadSavedMapping() {
   try {
-    const raw = localStorage.getItem(STORAGE_FILTER_KEY);
-    return raw ? JSON.parse(raw) : { hideArchived: true };
-  } catch (_) {
-    return { hideArchived: true };
-  }
+    const raw = localStorage.getItem(STORAGE_MAPPING_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function saveMapping(mapping) {
+  try { localStorage.setItem(STORAGE_MAPPING_KEY, JSON.stringify(mapping)); } catch (_) {}
 }
 
 // ─── Feature Card ─────────────────────────────────────────────────────────────
 
-function FeatureCard({ feature }) {
+function FeatureCard({ feature, horizon }) {
   const status = feature.status?.name;
   const team = getTeamName(feature);
   const cvp = feature._cvp;
@@ -49,7 +66,7 @@ function FeatureCard({ feature }) {
 
   return (
     <div
-      className={`feature-card ${pbUrl ? "clickable" : ""}`}
+      className={`feature-card ${horizon} ${pbUrl ? "clickable" : ""}`}
       onClick={() => pbUrl && window.open(pbUrl, "_blank", "noopener,noreferrer")}
       title={pbUrl ? "Open in ProductBoard" : undefined}
     >
@@ -86,23 +103,21 @@ function FeatureCard({ feature }) {
   );
 }
 
-// ─── Release Column ───────────────────────────────────────────────────────────
+// ─── Column ───────────────────────────────────────────────────────────────────
 
-function ReleaseColumn({ release, features }) {
-  const dateLabel = release
-    ? formatDate(release.startDate)
-    : null;
-
+function Column({ horizon, features, releaseNames }) {
   return (
     <div className="column">
       <div className="column-header">
         <div className="column-label">
-          <div className="column-label-dot" style={{
-            background: release ? "var(--accent)" : "var(--text-muted)"
-          }} />
+          <div className={`column-label-dot ${horizon}`} />
           <div>
-            <span className="column-name">{release ? release.name : "Unassigned"}</span>
-            {dateLabel && <span className="column-date">{dateLabel}</span>}
+            <span className="column-name">{HORIZON_LABELS[horizon]}</span>
+            {releaseNames.length > 0 && (
+              <span className="column-releases">
+                {releaseNames.join(" · ")}
+              </span>
+            )}
           </div>
         </div>
         <span className="column-count">{features.length}</span>
@@ -112,9 +127,72 @@ function ReleaseColumn({ release, features }) {
         <div className="empty-column"><span>No features</span></div>
       ) : (
         <div className="column-cards">
-          {features.map((f) => <FeatureCard key={f.id} feature={f} />)}
+          {features.map((f) => (
+            <FeatureCard key={f.id} feature={f} horizon={horizon} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Settings Panel ───────────────────────────────────────────────────────────
+
+function SettingsPanel({ mapping, onSave, onClose }) {
+  const [nowTerms, setNowTerms] = useState(mapping.now.join(", "));
+  const [nextTerms, setNextTerms] = useState(mapping.next.join(", "));
+  const [laterTerms, setLaterTerms] = useState(mapping.later.join(", "));
+
+  const handleSave = () => {
+    const newMapping = {
+      now: nowTerms.split(",").map((s) => s.trim()).filter(Boolean),
+      next: nextTerms.split(",").map((s) => s.trim()).filter(Boolean),
+      later: laterTerms.split(",").map((s) => s.trim()).filter(Boolean),
+    };
+    saveMapping(newMapping);
+    onSave(newMapping);
+    onClose();
+  };
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+          <h3 style={{ margin: 0 }}>Settings</h3>
+          <button className="btn btn-sm" onClick={onClose}>Close</button>
+        </div>
+
+        <p className="horizon-map-title">Release name → Horizon mapping</p>
+        <p className="horizon-map-desc">
+          Comma-separated keywords matched against each release's name
+          (case-insensitive, partial match). Archived releases are always hidden.
+          First match wins.
+        </p>
+
+        {[
+          { horizon: "now", label: "Now", value: nowTerms, onChange: setNowTerms },
+          { horizon: "next", label: "Next", value: nextTerms, onChange: setNextTerms },
+          { horizon: "later", label: "Later", value: laterTerms, onChange: setLaterTerms },
+        ].map(({ horizon, label, value, onChange }) => (
+          <div className="horizon-row" key={horizon}>
+            <span className={`horizon-badge ${horizon}`}>{label}</span>
+            <input
+              type="text"
+              className="field-input"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+            />
+          </div>
+        ))}
+
+        <button
+          className="btn btn-primary"
+          onClick={handleSave}
+          style={{ width: "100%", marginTop: "1.5rem" }}
+        >
+          Save &amp; apply
+        </button>
+      </div>
     </div>
   );
 }
@@ -143,54 +221,57 @@ async function exportBoardAsImage(boardRef) {
 // ─── Roadmap Board ────────────────────────────────────────────────────────────
 
 function RoadmapBoard({ releases, features, onReload }) {
-  const [hideArchived, setHideArchived] = useState(() => loadSavedFilter().hideArchived);
-  const [hideEmpty, setHideEmpty] = useState(false);
+  const [mapping, setMapping] = useState(() => loadSavedMapping() || DEFAULT_MAPPING);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showUnmapped, setShowUnmapped] = useState(false);
   const [exporting, setExporting] = useState(false);
   const boardRef = useRef(null);
 
-  // Save filter preference
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_FILTER_KEY, JSON.stringify({ hideArchived })); } catch (_) {}
-  }, [hideArchived]);
+  // Build a map of releaseId -> horizon, filtering out archived releases
+  const releaseHorizonMap = useMemo(() => {
+    const map = {}; // releaseId -> { horizon, name }
+    for (const r of releases) {
+      if (r.archived) continue; // hide archived releases entirely
+      const horizon = classifyRelease(r.name, mapping);
+      if (horizon) map[r.id] = { horizon, name: r.name };
+    }
+    return map;
+  }, [releases, mapping]);
 
-  const { columns, unassignedFeatures, totalShown } = useMemo(() => {
-    const filtered = hideArchived ? features.filter((f) => !f.archived) : features;
+  const { grouped, unmapped } = useMemo(() => {
+    const grouped = {
+      now: { features: [], releaseNames: new Set() },
+      next: { features: [], releaseNames: new Set() },
+      later: { features: [], releaseNames: new Set() },
+    };
+    const unmapped = [];
 
-    // Group by releaseId
-    const byRelease = {};
-    const unassigned = [];
-    for (const f of filtered) {
-      if (f._releaseId) {
-        if (!byRelease[f._releaseId]) byRelease[f._releaseId] = [];
-        byRelease[f._releaseId].push(f);
+    for (const f of features) {
+      if (f.archived) continue;
+      const releaseInfo = f._releaseId ? releaseHorizonMap[f._releaseId] : null;
+      if (releaseInfo) {
+        grouped[releaseInfo.horizon].features.push(f);
+        grouped[releaseInfo.horizon].releaseNames.add(releaseInfo.name);
       } else {
-        unassigned.push(f);
+        unmapped.push(f);
       }
     }
 
     // Sort features within each column by status then name
-    const sortFeatures = (arr) => arr.sort((a, b) => {
-      const sa = (a.status?.name ?? "").toLowerCase();
-      const sb = (b.status?.name ?? "").toLowerCase();
-      if (sa !== sb) return sa.localeCompare(sb);
-      return (a.name ?? "").toLowerCase().localeCompare((b.name ?? "").toLowerCase());
-    });
+    for (const h of HORIZONS) {
+      grouped[h].features.sort((a, b) => {
+        const sa = (a.status?.name ?? "").toLowerCase();
+        const sb = (b.status?.name ?? "").toLowerCase();
+        if (sa !== sb) return sa.localeCompare(sb);
+        return (a.name ?? "").toLowerCase().localeCompare((b.name ?? "").toLowerCase());
+      });
+      grouped[h].releaseNames = [...grouped[h].releaseNames];
+    }
 
-    const columns = releases.map((r) => ({
-      release: r,
-      features: sortFeatures(byRelease[r.id] ?? []),
-    }));
+    return { grouped, unmapped };
+  }, [features, releaseHorizonMap]);
 
-    const sortedUnassigned = sortFeatures(unassigned);
-
-    const totalShown = filtered.length;
-
-    return { columns, unassignedFeatures: sortedUnassigned, totalShown };
-  }, [features, releases, hideArchived]);
-
-  const visibleColumns = hideEmpty
-    ? columns.filter((c) => c.features.length > 0)
-    : columns;
+  const totalFeatures = HORIZONS.reduce((n, h) => n + grouped[h].features.length, 0);
 
   const handleExport = async () => {
     setExporting(true);
@@ -201,23 +282,28 @@ function RoadmapBoard({ releases, features, onReload }) {
 
   return (
     <>
+      {showSettings && (
+        <SettingsPanel
+          mapping={mapping}
+          onSave={setMapping}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
       <div className="header">
         <div className="header-brand">
           <div className="header-logo"><span>PB</span></div>
-          <span className="header-title">Release Roadmap</span>
+          <span className="header-title">Now · Next · Later</span>
         </div>
         <div className="header-actions">
           <span className="roadmap-count">
-            <strong>{totalShown}</strong> features · <strong>{releases.length}</strong> releases
+            <strong>{totalFeatures}</strong> features
           </span>
-          <label className="toggle-label">
-            <input type="checkbox" checked={hideArchived} onChange={(e) => setHideArchived(e.target.checked)} />
-            Hide archived
-          </label>
-          <label className="toggle-label">
-            <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />
-            Hide empty
-          </label>
+          {unmapped.length > 0 && (
+            <button className="btn btn-sm" onClick={() => setShowUnmapped(!showUnmapped)}>
+              {unmapped.length} unmapped
+            </button>
+          )}
           <button className="btn btn-sm" onClick={handleExport} disabled={exporting}>
             {exporting ? "Exporting…" : (
               <>
@@ -229,17 +315,26 @@ function RoadmapBoard({ releases, features, onReload }) {
             )}
           </button>
           <button className="btn btn-sm" onClick={onReload}>Refresh</button>
+          <button className="btn btn-sm" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
 
-      <div className="roadmap-body">
-        <div className="roadmap-grid" ref={boardRef}>
-          {visibleColumns.map(({ release, features: rFeatures }) => (
-            <ReleaseColumn key={release.id} release={release} features={rFeatures} />
+      <div className="roadmap-body" ref={boardRef}>
+        {unmapped.length > 0 && showUnmapped && (
+          <div className="unmapped-notice">
+            <strong>{unmapped.length} features</strong> belong to releases not mapped to a horizon.
+            Open <strong>Settings</strong> to add those release name keywords.
+          </div>
+        )}
+        <div className="roadmap-grid">
+          {HORIZONS.map((h) => (
+            <Column
+              key={h}
+              horizon={h}
+              features={grouped[h].features}
+              releaseNames={grouped[h].releaseNames}
+            />
           ))}
-          {unassignedFeatures.length > 0 && (
-            <ReleaseColumn key="unassigned" release={null} features={unassignedFeatures} />
-          )}
         </div>
       </div>
     </>
