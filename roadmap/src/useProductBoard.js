@@ -94,7 +94,9 @@ async function fetchCustomFieldValues(fieldId, label) {
     for (const item of items) {
       const featureId = item.hierarchyEntity?.id;
       if (!featureId) continue;
-      const val = item.value ?? item.option?.label ?? null;
+      // value can be a plain string (text fields) or { id, label } (dropdown fields)
+      const raw = item.value ?? null;
+      const val = raw?.label ?? (typeof raw === "string" ? raw : null) ?? item.option?.label ?? null;
       if (val !== null && val !== undefined && String(val).trim()) {
         map[featureId] = String(val).trim();
       }
