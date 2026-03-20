@@ -484,6 +484,19 @@ function RoadmapBoard({ releases, features, objectives, onReload }) {
     catch (_) { return []; }
   });
   const [showObjectiveFilter, setShowObjectiveFilter] = useState(false);
+  const [clientFacingFilter, setClientFacingFilter] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pb_client_facing") || "[]"); }
+    catch (_) { return []; }
+  });
+  const [showClientFacingFilter, setShowClientFacingFilter] = useState(false);
+
+  const toggleClientFacing = (val) => {
+    setClientFacingFilter((prev) => {
+      const next = prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val];
+      try { localStorage.setItem("pb_client_facing", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
   const boardRef = useRef(null); // kept for future use
 
   const toggleObjective = (objName) => {
@@ -561,6 +574,15 @@ function RoadmapBoard({ releases, features, objectives, onReload }) {
         const matches = selectedObjectives.some((o) => featureObjectives.includes(o));
         if (!matches) continue;
       }
+      // Apply client facing filter — show only features matching selected values
+      if (clientFacingFilter.length > 0) {
+        const val = f._clientFacing ?? "Not set";
+        const normalised = val.toLowerCase();
+        const matches = clientFacingFilter.some((fv) =>
+          fv === "Not set" ? !f._clientFacing : normalised === fv.toLowerCase()
+        );
+        if (!matches) continue;
+      }
       const releaseInfo = f._releaseId ? releaseHorizonMap[f._releaseId] : null;
       if (releaseInfo) {
         grouped[releaseInfo.horizon].features.push(f);
@@ -581,7 +603,7 @@ function RoadmapBoard({ releases, features, objectives, onReload }) {
     }
 
     return { grouped, unmapped };
-  }, [features, releaseHorizonMap, hiddenStatuses, selectedObjectives, activeHiddenStatuses]);
+  }, [features, releaseHorizonMap, hiddenStatuses, selectedObjectives, activeHiddenStatuses, clientFacingFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalFeatures = HORIZONS.reduce((n, h) => n + grouped[h].features.length, 0);
 
@@ -692,6 +714,37 @@ function RoadmapBoard({ releases, features, objectives, onReload }) {
               </div>
             )}
           </div>
+          <div className="status-filter-wrap">
+            <button className="btn btn-sm" onClick={() => setShowClientFacingFilter((v) => !v)}>
+              Client facing {clientFacingFilter.length > 0 ? `(${clientFacingFilter.join(", ")})` : "filter"}
+            </button>
+            {showClientFacingFilter && (
+              <div className="status-filter-dropdown">
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 8 }}>
+                  Client facing
+                </div>
+                {["Yes", "No", "Not set"].map((val) => (
+                  <label key={val} className="status-filter-item">
+                    <input
+                      type="checkbox"
+                      checked={clientFacingFilter.includes(val)}
+                      onChange={() => toggleClientFacing(val)}
+                    />
+                    <span style={{ fontSize: 12 }}>{val}</span>
+                  </label>
+                ))}
+                {clientFacingFilter.length > 0 && (
+                  <button
+                    className="btn btn-sm"
+                    style={{ width: "100%", marginTop: 8 }}
+                    onClick={() => { setClientFacingFilter([]); try { localStorage.removeItem("pb_client_facing"); } catch(_){} }}
+                  >
+                    Show all
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <button className="btn btn-sm" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
       </div>
@@ -757,7 +810,8 @@ export default function App() {
     <div className="app">
       {status === "idle" && <LoadingScreen message="Starting…" />}
       {status === "loading" && <LoadingScreen message={progress} />}
-{status === "error" && <ErrorScreen message={error + " | " + JSON.stringify(error)} onRetry={handleReload} />}      {status === "success" && (
+      {status === "error" && <ErrorScreen message={error} onRetry={handleReload} />}
+      {status === "success" && (
         <RoadmapBoard
           releases={releases}
           features={features}

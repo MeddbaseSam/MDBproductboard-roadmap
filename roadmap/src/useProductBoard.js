@@ -58,35 +58,37 @@ async function fetchAllPages(firstPath, onProgress, label) {
 
 // ─── Custom field helpers ─────────────────────────────────────────────────────
 
-async function findCVPFieldId() {
+// Find a custom field ID by name (case-insensitive)
+async function findCustomFieldId(fieldName) {
   try {
-    const types = ["text", "number", "dropdown", "textarea"];
+    const types = ["text", "number", "dropdown", "textarea", "custom-description"];
     for (const type of types) {
       const res = await pbFetch(`/hierarchy-entities/custom-fields?type=${type}`);
       const fields = res.data ?? [];
       const match = fields.find(
-        (f) => f.name?.toLowerCase().trim() === "customer value proposition"
+        (f) => f.name?.toLowerCase().trim() === fieldName.toLowerCase().trim()
       );
       if (match) {
-        console.log(`Found CVP field: ${match.id} (type: ${type})`);
+        console.log(`Found field "${fieldName}": ${match.id} (type: ${type})`);
         return match.id;
       }
     }
-    console.warn("CVP custom field not found");
+    console.warn(`Custom field "${fieldName}" not found`);
     return null;
   } catch (e) {
-    console.warn("Could not fetch custom fields:", e.message);
+    console.warn(`Could not fetch custom fields: ${e.message}`);
     return null;
   }
 }
 
-async function fetchCVPValues(cvpFieldId) {
-  if (!cvpFieldId) return {};
+// Fetch all values for a custom field, returns { [featureId]: value }
+async function fetchCustomFieldValues(fieldId, label) {
+  if (!fieldId) return {};
   try {
     const items = await fetchAllPages(
-      `/hierarchy-entities/custom-fields-values?customField.id=${cvpFieldId}`,
+      `/hierarchy-entities/custom-fields-values?customField.id=${fieldId}`,
       null,
-      "CVP values"
+      `${label} values`
     );
     const map = {};
     for (const item of items) {
@@ -97,10 +99,10 @@ async function fetchCVPValues(cvpFieldId) {
         map[featureId] = String(val).trim();
       }
     }
-    console.log(`Loaded ${Object.keys(map).length} CVP values`);
+    console.log(`Loaded ${Object.keys(map).length} ${label} values`);
     return map;
   } catch (e) {
-    console.warn("Could not fetch CVP values:", e.message);
+    console.warn(`Could not fetch ${label} values: ${e.message}`);
     return {};
   }
 }
@@ -202,9 +204,10 @@ function buildTeamMap(features, componentMap) {
 async function loadAll(onProgress) {
   onProgress("Loading releases and field definitions...");
 
-  const [releases, cvpFieldId, componentMap, { featureObjectiveMap, objectives }] = await Promise.all([
+  const [releases, cvpFieldId, clientFacingFieldId, componentMap, { featureObjectiveMap, objectives }] = await Promise.all([
     fetchAllPages("/releases", null, "releases"),
-    findCVPFieldId(),
+    findCustomFieldId("customer value prop"),
+    findCustomFieldId("client facing"),
     fetchComponentMap(),
     fetchObjectiveFeatureMap(),
   ]);
@@ -215,7 +218,10 @@ async function loadAll(onProgress) {
   ]);
 
   onProgress("Loading custom field values...");
-  const cvpMap = await fetchCVPValues(cvpFieldId);
+  const [cvpMap, clientFacingMap] = await Promise.all([
+    fetchCustomFieldValues(cvpFieldId, "Customer Value Prop"),
+    fetchCustomFieldValues(clientFacingFieldId, "Client facing"),
+  ]);
 
   // Build featureId -> releaseId map
   const featureReleaseMap = {};
@@ -235,6 +241,7 @@ async function loadAll(onProgress) {
     _cvp: cvpMap[f.id] ?? null,
     _team: teamMap[f.id] ?? null,
     _objectives: featureObjectiveMap[f.id] ?? [],
+    _clientFacing: clientFacingMap[f.id] ?? null,
   }));
 
   const sortedReleases = [...releases].sort((a, b) => {
